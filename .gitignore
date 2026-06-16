@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+.env
+
+# Data files (too large / contain PII)
+*.xlsx
+*.csv
+*.pptx
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
