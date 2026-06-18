@@ -721,6 +721,11 @@ def load_uploaded_file(uploaded_file):
                 data = pd.read_excel(uploaded_file, sheet_name="Raw_Data")
             else:
                 data = pd.read_excel(uploaded_file, sheet_name=0)
+        # Fix mixed-type columns that cause Arrow serialization errors
+        for col in data.columns:
+            if data[col].dtype == object:
+                # Convert object columns to string to avoid mixed-type issues
+                data[col] = data[col].astype(str).replace("nan", pd.NA).replace("None", pd.NA)
         return data, None
     except Exception as e:
         return None, str(e)
@@ -1225,9 +1230,9 @@ with st.sidebar:
             data, error = load_uploaded_file(uploaded_file)
             if data is not None:
                 st.session_state.uploaded_df = data
+                st.session_state.data_source = "📎 Upload Excel/CSV"
                 st.success(f"✅ Loaded {len(data):,} records")
-                if df is None:
-                    st.rerun()
+                st.rerun()
             else:
                 st.error(f"Error: {error}")
 
