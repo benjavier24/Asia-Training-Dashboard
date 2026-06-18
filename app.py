@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 from io import BytesIO
 import numpy as np
 from datetime import datetime
-from rapidfuzz import fuzz, process
+from thefuzz import fuzz, process
 
 # Page config
 st.set_page_config(
@@ -204,10 +204,12 @@ def fuzzy_match_store(store_name, candidates, threshold=70):
         return candidates[idx], 100
     result = process.extractOne(
         clean_name, clean_candidates,
-        scorer=fuzz.token_sort_ratio, score_cutoff=threshold
+        scorer=fuzz.token_sort_ratio,
+        score_cutoff=threshold
     )
     if result:
-        matched_text, score, idx = result
+        matched_text, score = result[0], result[1]
+        idx = clean_candidates.index(matched_text)
         return candidates[idx], score
     return None, 0
 
