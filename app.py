@@ -679,10 +679,20 @@ MASTER_FILE = r"c:\Users\BenjJavier\OneDrive - bolttech\Documents\Copilot\Create
 MASTER_SHEET = "Raw_Data"
 SALES_EXPORTS_FOLDER = r"c:\Users\BenjJavier\OneDrive - bolttech\Documents\Copilot\Created\Sales Exports"
 
+# SharePoint URL for the master file (used as reference for trainers)
+SHAREPOINT_URL = "https://bolttechio.sharepoint.com/:x:/s/SEATrainingSite/IQCmb4CztJcmTq5QCPy-h54KAbUdZARp7SWeZDL-c9frFnE"
+
+
+def is_running_on_cloud():
+    """Detect if we're running on Streamlit Cloud vs local machine."""
+    import os
+    # Streamlit Cloud runs on Linux; local dev is Windows
+    return not os.path.exists(MASTER_FILE)
+
 
 @st.cache_data(ttl=300)
 def load_master_data():
-    """Load the master training file."""
+    """Load the master training file from local OneDrive sync."""
     import os
     if not os.path.exists(MASTER_FILE):
         return None, "Master file not found."
@@ -700,9 +710,28 @@ def load_master_data():
         return None, str(e)
 
 
-# Initialize session state
+def load_uploaded_file(uploaded_file):
+    """Load data from an uploaded file."""
+    try:
+        if uploaded_file.name.endswith(".csv"):
+            data = pd.read_csv(uploaded_file)
+        else:
+            xls = pd.ExcelFile(uploaded_file)
+            if "Raw_Data" in xls.sheet_names:
+                data = pd.read_excel(uploaded_file, sheet_name="Raw_Data")
+            else:
+                data = pd.read_excel(uploaded_file, sheet_name=0)
+        return data, None
+    except Exception as e:
+        return None, str(e)
+
+
+# Initialize session state - smart default based on environment
 if "data_source" not in st.session_state:
-    st.session_state.data_source = "📂 Auto-load Master File"
+    if is_running_on_cloud():
+        st.session_state.data_source = "� Upload Excel/CSV"
+    else:
+        st.session_state.data_source = "�📂 Auto-load Master File"
 
 # Load data
 df = None
@@ -716,11 +745,21 @@ if st.session_state.data_source == "📂 Auto-load Master File":
         data_status = f"✅ {len(df):,} records · Updated {last_modified.strftime('%b %d, %I:%M %p')}"
     else:
         data_status = f"⚠️ {result[1]}"
-        df = generate_sample_data()
-        data_status += " (using demo data)"
+        if is_running_on_cloud():
+            data_status = "📎 Upload the master file from SharePoint to get started"
+        else:
+            df = generate_sample_data()
+            data_status += " (using demo data)"
 elif st.session_state.data_source == "🎯 Use Demo Data":
     df = generate_sample_data()
     data_status = f"✅ Demo data ({len(df)} records)"
+elif st.session_state.data_source == "📎 Upload Excel/CSV":
+    # Handled in sidebar — check session state for uploaded data
+    if "uploaded_df" in st.session_state and st.session_state.uploaded_df is not None:
+        df = st.session_state.uploaded_df
+        data_status = f"✅ {len(df):,} records (uploaded)"
+    else:
+        data_status = "📎 Upload the master file to get started"
 
 # Show data status in header
 with header_col2:
@@ -1171,51 +1210,62 @@ if df is not None and len(df) > 0:
 with st.sidebar:
     st.markdown("---")
 
-    with st.expander("⚙️ Data Source", expanded=False):
-        _options = ["📂 Auto-load Master File", "📋 Paste Data", "📎 Upload Excel/CSV", "🎯 Use Demo Data"]
-        _current = st.session_state.data_source if st.session_state.data_source in _options else _options[0]
-        data_source = st.radio(
-            "Choose input:",
-            _options,
-            index=_options.index(_current),
-            key="data_source_radio"
-        )
+    # On cloud: show upload prominently. On local: show as expander.
+    if is_running_on_cloud():
+        st.markdown("### 📎 Load Data")
+        st.markdown("""
+        <div style="background:rgba(0,186,199,0.08); border-radius:8px; padding:10px 12px; margin-bottom:12px; font-size:0.8rem; border:1px solid rgba(0,186,199,0.2);">
+            📁 Upload the master file from SharePoint:<br>
+            <b>SEA Training Site → Global Documents → Training Dashboard Masterfile</b>
+        </div>
+        """, unsafe_allow_html=True)
 
-        if data_source != st.session_state.data_source:
-            st.session_state.data_source = data_source
-            st.rerun()
+        uploaded_file = st.file_uploader("Upload Master File", type=["xlsx", "csv"], key="main_upload")
+        if uploaded_file:
+            data, error = load_uploaded_file(uploaded_file)
+            if data is not None:
+                st.session_state.uploaded_df = data
+                st.success(f"✅ Loaded {len(data):,} records")
+                if df is None:
+                    st.rerun()
+            else:
+                st.error(f"Error: {error}")
 
-        if data_source == "📂 Auto-load Master File":
-            if st.button("🔄 Refresh Data", use_container_width=True):
-                st.cache_data.clear()
+        st.markdown("---")
+        with st.expander("Other options", expanded=False):
+            if st.button("🎯 Use Demo Data", use_container_width=True):
+                st.session_state.data_source = "🎯 Use Demo Data"
+                st.rerun()
+    else:
+        with st.expander("⚙️ Data Source", expanded=False):
+            _options = ["📂 Auto-load Master File", " Upload Excel/CSV", "🎯 Use Demo Data"]
+            _current = st.session_state.data_source if st.session_state.data_source in _options else _options[0]
+            data_source = st.radio(
+                "Choose input:",
+                _options,
+                index=_options.index(_current),
+                key="data_source_radio"
+            )
+
+            if data_source != st.session_state.data_source:
+                st.session_state.data_source = data_source
                 st.rerun()
 
-        elif data_source == "📎 Upload Excel/CSV":
-            uploaded_file = st.file_uploader("Upload your file", type=["xlsx", "csv"])
-            if uploaded_file:
-                try:
-                    if uploaded_file.name.endswith(".csv"):
-                        df = pd.read_csv(uploaded_file)
-                    else:
-                        xls = pd.ExcelFile(uploaded_file)
-                        if "Raw_Data" in xls.sheet_names:
-                            df = pd.read_excel(uploaded_file, sheet_name="Raw_Data")
-                        else:
-                            df = pd.read_excel(uploaded_file, sheet_name=0)
-                    st.success(f"Loaded {len(df)} records")
-                except Exception as e:
-                    st.error(f"Error: {e}")
+            if data_source == "📂 Auto-load Master File":
+                if st.button("🔄 Refresh Data", use_container_width=True):
+                    st.cache_data.clear()
+                    st.rerun()
 
-        elif data_source == "📋 Paste Data":
-            pasted = st.text_area("Paste tab-separated data:", height=120,
-                placeholder="Country\tDate of Training\tTrainer Name\t...")
-            if pasted.strip():
-                try:
-                    from io import StringIO
-                    df = pd.read_csv(StringIO(pasted), sep="\t")
-                    st.success(f"Parsed {len(df)} records")
-                except Exception as e:
-                    st.error(f"Could not parse: {e}")
+            elif data_source == "📎 Upload Excel/CSV":
+                uploaded_file = st.file_uploader("Upload your file", type=["xlsx", "csv"])
+                if uploaded_file:
+                    data, error = load_uploaded_file(uploaded_file)
+                    if data is not None:
+                        st.session_state.uploaded_df = data
+                        st.success(f"Loaded {len(data):,} records")
+                        st.rerun()
+                    else:
+                        st.error(f"Error: {error}")
 
     with st.expander("📊 Sales Data (Attach Rate)", expanded=False):
         import os
@@ -1234,9 +1284,10 @@ with st.sidebar:
             else:
                 st.warning(sales_status)
         else:
-            st.info("Sales folder not configured.")
+            if not is_running_on_cloud():
+                st.info("Sales folder not configured.")
 
-        sales_upload = st.file_uploader("Or upload sales data:", type=["xlsx", "csv"], key="sales_file")
+        sales_upload = st.file_uploader("Upload sales data:", type=["xlsx", "csv"], key="sales_file")
         if sales_upload:
             try:
                 if sales_upload.name.endswith(".csv"):
@@ -1259,12 +1310,27 @@ with st.sidebar:
 # === NO DATA STATE ===
 if df is None or len(df) == 0:
     st.markdown("---")
-    st.info("👈 Use the sidebar filters and data source to get started.")
-    st.markdown("""
-    ### 📋 Getting Started
+    if is_running_on_cloud():
+        st.markdown("""
+        ### 📎 Upload Your Training Data
 
-    This dashboard **auto-detects** your columns. Upload any Excel/CSV with training data.
+        **To get started:**
+        1. Go to SharePoint → **SEA Training Site → Global Documents → Training Dashboard Masterfile**
+        2. Download `Asia Training Dashboard v1.xlsx`
+        3. Upload it using the sidebar on the left
 
-    **Key fields recognized:** Date, Trainer, Account, Country, Store, Training Name,
-    Assessment Score, Pass/Fail, Attach Rate, Training Hours, and more.
-    """)
+        The dashboard will automatically detect your columns and populate all metrics.
+
+        ---
+        *Or click "Use Demo Data" in the sidebar to explore with sample data.*
+        """)
+    else:
+        st.info("👈 Use the sidebar filters and data source to get started.")
+        st.markdown("""
+        ### 📋 Getting Started
+
+        This dashboard **auto-detects** your columns. Upload any Excel/CSV with training data.
+
+        **Key fields recognized:** Date, Trainer, Account, Country, Store, Training Name,
+        Assessment Score, Pass/Fail, Attach Rate, Training Hours, and more.
+        """)
