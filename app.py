@@ -606,6 +606,388 @@ def generate_ai_insights(df, metrics, kpis):
     return insights
 
 
+def process_natural_query(question, df, metrics, kpis):
+    """Process a natural language question about the training data and return a text answer."""
+    q = question.strip().lower()
+    answers = []
+
+    # Helper: get column values for a dimension
+    def get_dimension_values(dim_col):
+        if dim_col in df.columns:
+            return df[dim_col].dropna().unique().tolist()
+        return []
+
+    # Helper: detect which dimension/filter the user is asking about
+    def detect_entity(q, dim_col):
+        """Find if the user mentioned a specific value from a dimension column."""
+        values = get_dimension_values(dim_col)
+        for val in values:
+            if str(val).lower() in q:
+                return str(val)
+        return None
+
+    # Detect mentioned entities
+    mentioned_country = detect_entity(q, "Country")
+    mentioned_account = detect_entity(q, "Account")
+    mentioned_trainer = detect_entity(q, "Trainer")
+    mentioned_store = detect_entity(q, "Store")
+    mentioned_training = detect_entity(q, "Training Name")
+
+    # Build a filtered subset based on mentioned entities
+    subset = df.copy()
+    filter_desc = []
+    if mentioned_country:
+        subset = subset[subset["Country"].str.lower() == mentioned_country.lower()]
+        filter_desc.append(f"Market: {mentioned_country}")
+    if mentioned_account:
+        subset = subset[subset["Account"].str.lower() == mentioned_account.lower()]
+        filter_desc.append(f"Account: {mentioned_account}")
+    if mentioned_trainer:
+        subset = subset[subset["Trainer"].str.lower() == mentioned_trainer.lower()]
+        filter_desc.append(f"Trainer: {mentioned_trainer}")
+    if mentioned_store:
+        subset = subset[subset["Store"].str.lower() == mentioned_store.lower()]
+        filter_desc.append(f"Store: {mentioned_store}")
+    if mentioned_training:
+        subset = subset[subset["Training Name"].str.lower() == mentioned_training.lower()]
+        filter_desc.append(f"Training: {mentioned_training}")
+
+    if len(subset) == 0:
+        return "No data found for the specified filters. Check spelling or try broader terms."
+
+    filter_note = f"📍 Filtered to: {', '.join(filter_desc)}" if filter_desc else "📍 Showing: All data"
+
+    # === QUESTION TYPE DETECTION ===
+
+    # WHY questions (root cause analysis)
+    is_why = any(w in q for w in ["why", "reason", "cause", "explain", "what's wrong", "what happened"])
+
+    # COMPARISON questions
+    is_compare = any(w in q for w in ["compare", "vs", "versus", "difference between", "compared to"])
+
+    # RANKING questions
+    is_ranking = any(w in q for w in ["top", "best", "worst", "bottom", "highest", "lowest", "rank", "ranking"])
+
+    # COUNT / TOTAL questions
+    is_count = any(w in q for w in ["how many", "total", "count", "number of"])
+
+    # PASS RATE questions
+    is_pass_rate = any(w in q for w in ["pass rate", "passing rate", "pass %", "passing", "fail", "failure"])
+
+    # SCORE questions
+    is_score = any(w in q for w in ["score", "average score", "avg score", "assessment"])
+
+    # ATTACH RATE questions
+    is_attach = any(w in q for w in ["attach", "attachment", "attach rate", "conversion"])
+
+    # TRAINER questions
+    is_trainer_q = any(w in q for w in ["trainer", "facilitator", "who trained"])
+
+    # STORE questions
+    is_store_q = any(w in q for w in ["store", "branch", "outlet", "location"])
+
+    # === GENERATE ANSWERS ===
+
+    # WHY analysis (dig into contributing factors)
+    if is_why and is_pass_rate:
+        answers.append(f"**🔍 Analysis: Why is the pass rate {'low' if 'low' in q else 'what it is'}?**")
+        answers.append(filter_note)
+        answers.append("")
+
+        if "Pass Flag" in subset.columns:
+            overall_rate = subset["Pass Flag"].mean() * 100
+            answers.append(f"• Overall pass rate in this scope: **{overall_rate:.1f}%**")
+            total_records = len(subset)
+            passed = int(subset["Pass Flag"].sum())
+            failed = total_records - passed
+            answers.append(f"• {passed} passed, {failed} failed out of {total_records} records")
+            answers.append("")
+
+            # Break down by available dimensions
+            if "Account" in subset.columns and subset["Account"].nunique() > 1:
+                acct_rates = subset.groupby("Account")["Pass Flag"].agg(["mean", "count"]).reset_index()
+                acct_rates["rate"] = (acct_rates["mean"] * 100).round(1)
+                acct_rates = acct_rates.sort_values("rate", ascending=True)
+                answers.append("**By Account (lowest first):**")
+                for _, row in acct_rates.iterrows():
+                    answers.append(f"  • {row['Account']}: {row['rate']}% ({int(row['count'])} records)")
+                answers.append("")
+
+            if "Trainer" in subset.columns and subset["Trainer"].nunique() > 1:
+                trainer_rates = subset.groupby("Trainer")["Pass Flag"].agg(["mean", "count"]).reset_index()
+                trainer_rates["rate"] = (trainer_rates["mean"] * 100).round(1)
+                trainer_rates = trainer_rates.sort_values("rate", ascending=True)
+                answers.append("**By Trainer (lowest first):**")
+                for _, row in trainer_rates.head(5).iterrows():
+                    answers.append(f"  • {row['Trainer']}: {row['rate']}% ({int(row['count'])} sessions)")
+                answers.append("")
+
+            if "Training Name" in subset.columns and subset["Training Name"].nunique() > 1:
+                prog_rates = subset.groupby("Training Name")["Pass Flag"].agg(["mean", "count"]).reset_index()
+                prog_rates["rate"] = (prog_rates["mean"] * 100).round(1)
+                prog_rates = prog_rates.sort_values("rate", ascending=True)
+                answers.append("**By Training Program (lowest first):**")
+                for _, row in prog_rates.head(5).iterrows():
+                    answers.append(f"  • {row['Training Name']}: {row['rate']}% ({int(row['count'])} learners)")
+                answers.append("")
+
+            if "Assessment Score" in subset.columns:
+                scores = subset["Assessment Score"].dropna()
+                if len(scores) > 0:
+                    avg = scores.mean()
+                    if avg <= 1:
+                        avg *= 100
+                        scores = scores * 100
+                    answers.append(f"**Score Distribution:** Avg={avg:.1f}%, Min={scores.min():.0f}%, Max={scores.max():.0f}%")
+                    below_60 = (scores < 60).sum()
+                    if below_60 > 0:
+                        answers.append(f"  ⚠️ {below_60} learners scored below 60%")
+
+            answers.append("")
+            answers.append("**💡 Possible causes:** Look at accounts/trainers with lowest rates above. "
+                          "Consider content difficulty, trainer effectiveness, or learner preparation.")
+        else:
+            answers.append("Pass rate data not available in this dataset.")
+
+    elif is_why and is_attach:
+        answers.append("**🔍 Analysis: Attach Rate Performance**")
+        answers.append(filter_note)
+        answers.append("")
+        if "Attach Rate Before" in subset.columns and "Attach Rate After" in subset.columns:
+            before_vals = subset["Attach Rate Before"].dropna()
+            after_vals = subset["Attach Rate After"].dropna()
+            if len(before_vals) > 0 and len(after_vals) > 0:
+                avg_before = before_vals.mean()
+                avg_after = after_vals.mean()
+                if avg_before <= 1:
+                    avg_before *= 100
+                    avg_after *= 100
+                diff = avg_after - avg_before
+                answers.append(f"• Before training: **{avg_before:.1f}%**")
+                answers.append(f"• After training: **{avg_after:.1f}%**")
+                answers.append(f"• Change: **{'+' if diff > 0 else ''}{diff:.1f}pp**")
+                if diff < 0:
+                    answers.append("")
+                    answers.append("⚠️ Attach rate declined. Possible reasons: seasonal effects, "
+                                  "insufficient sales follow-up, or training not translating to floor behavior.")
+            else:
+                answers.append("Insufficient attach rate data for analysis.")
+        else:
+            answers.append("Attach rate columns not available.")
+
+    # RANKING questions
+    elif is_ranking:
+        answers.append(filter_note)
+        answers.append("")
+
+        is_bottom = any(w in q for w in ["worst", "bottom", "lowest"])
+        n = 5  # default top/bottom count
+
+        if is_pass_rate and "Pass Flag" in subset.columns:
+            if is_trainer_q and "Trainer" in subset.columns:
+                grouped = subset.groupby("Trainer")["Pass Flag"].agg(["mean", "count"]).reset_index()
+                grouped["rate"] = (grouped["mean"] * 100).round(1)
+                grouped = grouped.sort_values("rate", ascending=is_bottom).head(n)
+                label = "Bottom" if is_bottom else "Top"
+                answers.append(f"**{label} {n} Trainers by Pass Rate:**")
+                for i, (_, row) in enumerate(grouped.iterrows(), 1):
+                    answers.append(f"  {i}. {row['Trainer']} — {row['rate']}% ({int(row['count'])} sessions)")
+            elif is_store_q and "Store" in subset.columns:
+                grouped = subset.groupby("Store")["Pass Flag"].agg(["mean", "count"]).reset_index()
+                grouped["rate"] = (grouped["mean"] * 100).round(1)
+                grouped = grouped.sort_values("rate", ascending=is_bottom).head(n)
+                label = "Bottom" if is_bottom else "Top"
+                answers.append(f"**{label} {n} Stores by Pass Rate:**")
+                for i, (_, row) in enumerate(grouped.iterrows(), 1):
+                    answers.append(f"  {i}. {row['Store']} — {row['rate']}% ({int(row['count'])} records)")
+            elif "Account" in subset.columns:
+                grouped = subset.groupby("Account")["Pass Flag"].agg(["mean", "count"]).reset_index()
+                grouped["rate"] = (grouped["mean"] * 100).round(1)
+                grouped = grouped.sort_values("rate", ascending=is_bottom).head(n)
+                label = "Bottom" if is_bottom else "Top"
+                answers.append(f"**{label} {n} Accounts by Pass Rate:**")
+                for i, (_, row) in enumerate(grouped.iterrows(), 1):
+                    answers.append(f"  {i}. {row['Account']} — {row['rate']}% ({int(row['count'])} records)")
+            elif "Country" in subset.columns:
+                grouped = subset.groupby("Country")["Pass Flag"].agg(["mean", "count"]).reset_index()
+                grouped["rate"] = (grouped["mean"] * 100).round(1)
+                grouped = grouped.sort_values("rate", ascending=is_bottom).head(n)
+                label = "Bottom" if is_bottom else "Top"
+                answers.append(f"**{label} {n} Markets by Pass Rate:**")
+                for i, (_, row) in enumerate(grouped.iterrows(), 1):
+                    answers.append(f"  {i}. {row['Country']} — {row['rate']}% ({int(row['count'])} records)")
+        elif is_score and "Assessment Score" in subset.columns:
+            dim = "Account" if "Account" in subset.columns else "Country" if "Country" in subset.columns else None
+            if dim:
+                grouped = subset.groupby(dim)["Assessment Score"].mean().reset_index()
+                grouped["Assessment Score"] = grouped["Assessment Score"].apply(lambda x: x * 100 if x <= 1 else x).round(1)
+                grouped = grouped.sort_values("Assessment Score", ascending=is_bottom).head(n)
+                label = "Bottom" if is_bottom else "Top"
+                answers.append(f"**{label} {n} by Assessment Score ({dim}):**")
+                for i, (_, row) in enumerate(grouped.iterrows(), 1):
+                    answers.append(f"  {i}. {row[dim]} — {row['Assessment Score']}%")
+        elif is_count:
+            dim = "Account" if "Account" in subset.columns else "Country" if "Country" in subset.columns else None
+            if dim:
+                grouped = subset.groupby(dim).size().reset_index(name="Count")
+                grouped = grouped.sort_values("Count", ascending=is_bottom).head(n)
+                label = "Bottom" if is_bottom else "Top"
+                answers.append(f"**{label} {n} by Training Volume ({dim}):**")
+                for i, (_, row) in enumerate(grouped.iterrows(), 1):
+                    answers.append(f"  {i}. {row[dim]} — {row['Count']:,} records")
+        else:
+            # Generic ranking by volume
+            dim = "Account" if "Account" in subset.columns else "Country" if "Country" in subset.columns else None
+            if dim:
+                grouped = subset.groupby(dim).size().reset_index(name="Count")
+                grouped = grouped.sort_values("Count", ascending=is_bottom).head(n)
+                label = "Bottom" if is_bottom else "Top"
+                answers.append(f"**{label} {n} by Volume ({dim}):**")
+                for i, (_, row) in enumerate(grouped.iterrows(), 1):
+                    answers.append(f"  {i}. {row[dim]} — {row['Count']:,} records")
+
+    # COMPARISON questions
+    elif is_compare:
+        answers.append(filter_note)
+        answers.append("")
+        # Compare across countries or accounts
+        if "Country" in subset.columns and subset["Country"].nunique() > 1:
+            answers.append("**Market Comparison:**")
+            compare_data = subset.groupby("Country").agg(
+                records=("Country", "count"),
+                **({} if "Pass Flag" not in subset.columns else {"pass_rate": ("Pass Flag", "mean")}),
+                **({} if "Assessment Score" not in subset.columns else {"avg_score": ("Assessment Score", "mean")})
+            ).reset_index()
+            for _, row in compare_data.iterrows():
+                line = f"  • **{row['Country']}**: {int(row['records']):,} records"
+                if "pass_rate" in compare_data.columns:
+                    line += f", Pass Rate: {row['pass_rate'] * 100:.1f}%"
+                if "avg_score" in compare_data.columns:
+                    score = row["avg_score"]
+                    score = score * 100 if score <= 1 else score
+                    line += f", Avg Score: {score:.1f}%"
+                answers.append(line)
+        elif "Account" in subset.columns and subset["Account"].nunique() > 1:
+            answers.append("**Account Comparison:**")
+            compare_data = subset.groupby("Account").agg(
+                records=("Account", "count"),
+                **({} if "Pass Flag" not in subset.columns else {"pass_rate": ("Pass Flag", "mean")})
+            ).reset_index()
+            for _, row in compare_data.iterrows():
+                line = f"  • **{row['Account']}**: {int(row['records']):,} records"
+                if "pass_rate" in compare_data.columns:
+                    line += f", Pass Rate: {row['pass_rate'] * 100:.1f}%"
+                answers.append(line)
+
+    # PASS RATE questions (without why)
+    elif is_pass_rate and "Pass Flag" in subset.columns:
+        answers.append(filter_note)
+        answers.append("")
+        rate = subset["Pass Flag"].mean() * 100
+        total = len(subset)
+        passed = int(subset["Pass Flag"].sum())
+        answers.append(f"**Pass Rate: {rate:.1f}%** ({passed}/{total} passed)")
+
+        if "Country" in subset.columns and subset["Country"].nunique() > 1:
+            answers.append("")
+            answers.append("By Market:")
+            by_country = subset.groupby("Country")["Pass Flag"].mean().sort_values(ascending=False)
+            for country, rate_val in by_country.items():
+                answers.append(f"  • {country}: {rate_val * 100:.1f}%")
+
+    # SCORE questions
+    elif is_score and "Assessment Score" in subset.columns:
+        answers.append(filter_note)
+        answers.append("")
+        scores = subset["Assessment Score"].dropna()
+        if len(scores) > 0:
+            avg = scores.mean()
+            if avg <= 1:
+                avg *= 100
+                scores = scores * 100
+            answers.append(f"**Avg Assessment Score: {avg:.1f}%**")
+            answers.append(f"  • Min: {scores.min():.0f}%, Max: {scores.max():.0f}%, Median: {scores.median():.0f}%")
+            answers.append(f"  • Records with scores: {len(scores):,}")
+
+    # ATTACH RATE questions
+    elif is_attach:
+        answers.append(filter_note)
+        answers.append("")
+        if "Attach Rate Before" in subset.columns and "Attach Rate After" in subset.columns:
+            before_vals = subset["Attach Rate Before"].dropna()
+            after_vals = subset["Attach Rate After"].dropna()
+            if len(before_vals) > 0:
+                avg_b = before_vals.mean()
+                avg_a = after_vals.mean()
+                if avg_b <= 1:
+                    avg_b *= 100
+                    avg_a *= 100
+                answers.append(f"**Attach Rate Before:** {avg_b:.1f}%")
+                answers.append(f"**Attach Rate After:** {avg_a:.1f}%")
+                answers.append(f"**Improvement:** {'+' if (avg_a - avg_b) > 0 else ''}{avg_a - avg_b:.1f}pp")
+            else:
+                answers.append("No attach rate data available for this filter.")
+        else:
+            answers.append("Attach rate columns not found in the data.")
+
+    # COUNT questions
+    elif is_count:
+        answers.append(filter_note)
+        answers.append("")
+        answers.append(f"**Total Records:** {len(subset):,}")
+        if "Trainee Code" in subset.columns:
+            answers.append(f"**Unique Learners:** {subset['Trainee Code'].nunique():,}")
+        elif "Trainee Name" in subset.columns:
+            answers.append(f"**Unique Learners:** {subset['Trainee Name'].nunique():,}")
+        if "Training ID" in subset.columns:
+            answers.append(f"**Sessions:** {subset['Training ID'].nunique():,}")
+        if "Store" in subset.columns:
+            answers.append(f"**Stores:** {subset['Store'].nunique():,}")
+        if "Account" in subset.columns:
+            answers.append(f"**Accounts:** {subset['Account'].nunique():,}")
+        if "Country" in subset.columns:
+            answers.append(f"**Markets:** {subset['Country'].nunique():,}")
+
+    # TRAINER questions
+    elif is_trainer_q and "Trainer" in subset.columns:
+        answers.append(filter_note)
+        answers.append("")
+        trainer_data = subset.groupby("Trainer").agg(
+            sessions=("Trainer", "count"),
+            **({} if "Pass Flag" not in subset.columns else {"pass_rate": ("Pass Flag", "mean")})
+        ).reset_index().sort_values("sessions", ascending=False)
+        answers.append(f"**Trainers ({len(trainer_data)}):**")
+        for _, row in trainer_data.iterrows():
+            line = f"  • {row['Trainer']}: {int(row['sessions'])} sessions"
+            if "pass_rate" in trainer_data.columns:
+                line += f", Pass Rate: {row['pass_rate'] * 100:.1f}%"
+            answers.append(line)
+
+    # Generic summary (fallback)
+    else:
+        answers.append(filter_note)
+        answers.append("")
+        answers.append(f"**Summary for your query:**")
+        answers.append(f"• Records: {len(subset):,}")
+        if "Pass Flag" in subset.columns:
+            answers.append(f"• Pass Rate: {subset['Pass Flag'].mean() * 100:.1f}%")
+        if "Assessment Score" in subset.columns:
+            avg = subset["Assessment Score"].dropna().mean()
+            if avg <= 1:
+                avg *= 100
+            answers.append(f"• Avg Score: {avg:.1f}%")
+        if "Country" in subset.columns:
+            answers.append(f"• Markets: {', '.join(subset['Country'].dropna().unique().tolist())}")
+        if "Account" in subset.columns:
+            answers.append(f"• Accounts: {', '.join(subset['Account'].dropna().unique().tolist()[:10])}")
+        answers.append("")
+        answers.append("💡 *Try asking: 'Why is the pass rate low for [country]?', "
+                      "'Top 5 stores by pass rate', 'Compare markets', "
+                      "'How many trainees in PH?'*")
+
+    return "\n".join(answers)
+
+
 def generate_sample_data():
     """Generate sample training data mimicking the real format."""
     np.random.seed(42)
@@ -944,8 +1326,8 @@ if df is not None and len(df) > 0:
     # ─── TABBED CONTENT SECTIONS ───
     st.markdown("---")
 
-    tab_overview, tab_performance, tab_trends, tab_data = st.tabs([
-        "📋 Overview & Insights", "🎯 Performance", "📈 Trends", "🗂️ Data & Export"
+    tab_overview, tab_performance, tab_trends, tab_ask, tab_data = st.tabs([
+        "📋 Overview & Insights", "🎯 Performance", "📈 Trends", "🤖 Ask the Data", "🗂️ Data & Export"
     ])
 
     # === TAB 1: OVERVIEW & INSIGHTS ===
@@ -1171,7 +1553,91 @@ if df is not None and len(df) > 0:
             st.plotly_chart(fig, use_container_width=True)
 
 
-    # === TAB 4: DATA & EXPORT ===
+    # === TAB 4: ASK THE DATA ===
+    with tab_ask:
+        st.markdown('<div class="section-header">🤖 Ask the Data</div>', unsafe_allow_html=True)
+        st.markdown("""
+        <div class="insight-box">
+        Ask questions about your training data in plain English. Examples:<br>
+        • "Why do we have a low passing rate for Vietnam?"<br>
+        • "Top 5 stores by pass rate"<br>
+        • "Compare markets"<br>
+        • "What's the pass rate for Samsung?"<br>
+        • "How many trainees in PH?"<br>
+        • "Which trainer has the most sessions?"
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Chat history in session state
+        if "ask_history" not in st.session_state:
+            st.session_state.ask_history = []
+
+        # Display chat history
+        for entry in st.session_state.ask_history:
+            st.markdown(f"**🧑 You:** {entry['question']}")
+            st.markdown(entry["answer"])
+            st.markdown("---")
+
+        # Input
+        user_question = st.text_input("💬 Ask a question about your data:",
+                                       placeholder="e.g., Why is Vietnam's pass rate low?",
+                                       key="nlq_input")
+
+        ask_col1, ask_col2 = st.columns([1, 5])
+        with ask_col1:
+            ask_btn = st.button("Ask", type="primary", use_container_width=True)
+        with ask_col2:
+            if st.button("Clear History", use_container_width=False):
+                st.session_state.ask_history = []
+                st.rerun()
+
+        if ask_btn and user_question:
+            answer = process_natural_query(user_question, df, metrics, kpis)
+            st.session_state.ask_history.append({
+                "question": user_question,
+                "answer": answer
+            })
+            st.rerun()
+
+        # Quick-ask buttons for common questions
+        st.markdown("")
+        st.markdown("**Quick questions:**")
+        quick_col1, quick_col2, quick_col3 = st.columns(3)
+        with quick_col1:
+            if st.button("📊 Overall pass rate", use_container_width=True, key="quick_pass"):
+                answer = process_natural_query("What is the overall pass rate?", df, metrics, kpis)
+                st.session_state.ask_history.append({"question": "What is the overall pass rate?", "answer": answer})
+                st.rerun()
+        with quick_col2:
+            if st.button("🌏 Compare markets", use_container_width=True, key="quick_compare"):
+                answer = process_natural_query("Compare all markets", df, metrics, kpis)
+                st.session_state.ask_history.append({"question": "Compare all markets", "answer": answer})
+                st.rerun()
+        with quick_col3:
+            if st.button("🏆 Top accounts", use_container_width=True, key="quick_top"):
+                answer = process_natural_query("Top 5 accounts by pass rate", df, metrics, kpis)
+                st.session_state.ask_history.append({"question": "Top 5 accounts by pass rate", "answer": answer})
+                st.rerun()
+
+        quick_col4, quick_col5, quick_col6 = st.columns(3)
+        with quick_col4:
+            if st.button("👤 Trainer breakdown", use_container_width=True, key="quick_trainer"):
+                answer = process_natural_query("Show me trainer performance", df, metrics, kpis)
+                st.session_state.ask_history.append({"question": "Show me trainer performance", "answer": answer})
+                st.rerun()
+        with quick_col5:
+            if st.button("📈 Attach rate impact", use_container_width=True, key="quick_attach"):
+                answer = process_natural_query("What is the attach rate improvement?", df, metrics, kpis)
+                st.session_state.ask_history.append({"question": "What is the attach rate improvement?", "answer": answer})
+                st.rerun()
+        with quick_col6:
+            if st.button("📋 Data summary", use_container_width=True, key="quick_summary"):
+                answer = process_natural_query("How many total records and learners?", df, metrics, kpis)
+                st.session_state.ask_history.append({"question": "How many total records and learners?", "answer": answer})
+                st.rerun()
+
+
+    # === TAB 5: DATA & EXPORT ===
     with tab_data:
         data_col1, data_col2 = st.columns([3, 1])
 
