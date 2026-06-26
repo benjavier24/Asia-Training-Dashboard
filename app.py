@@ -1367,7 +1367,7 @@ if df is not None and len(df) > 0:
 
         # Input
         user_question = st.text_input("💬 Ask a question about your data:",
-                                       placeholder="e.g., Why is Vietnam's pass rate low?",
+                                       placeholder="e.g., Compare markets by pass rate",
                                        key="nlq_input")
 
         ask_col1, ask_col2 = st.columns([1, 5])
