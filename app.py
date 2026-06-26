@@ -1326,8 +1326,8 @@ if df is not None and len(df) > 0:
     # ─── TABBED CONTENT SECTIONS ───
     st.markdown("---")
 
-    tab_overview, tab_performance, tab_trends, tab_ask, tab_data = st.tabs([
-        "📋 Overview & Insights", "🎯 Performance", "📈 Trends", "🤖 Ask the Data", "🗂️ Data & Export"
+    tab_overview, tab_performance, tab_trends, tab_data = st.tabs([
+        "📋 Overview & Insights", "🎯 Performance", "📈 Trends", "🗂️ Data & Export"
     ])
 
     # === TAB 1: OVERVIEW & INSIGHTS ===
@@ -1340,6 +1340,88 @@ if df is not None and len(df) > 0:
             for i, (icon, text) in enumerate(insights):
                 with cols[i % 2]:
                     st.markdown(f'<div class="insight-box">{icon} {text}</div>', unsafe_allow_html=True)
+
+        # Ask the Data section
+        st.markdown("")
+        st.markdown('<div class="section-header">🤖 Ask the Data</div>', unsafe_allow_html=True)
+        st.markdown("""
+        <div class="insight-box">
+        Ask questions about your training data in plain English. Examples:<br>
+        • "Why do we have a low passing rate for Vietnam?"<br>
+        • "Top 5 stores by pass rate"<br>
+        • "Compare markets"<br>
+        • "What's the pass rate for Samsung?"<br>
+        • "How many trainees in PH?"
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Chat history in session state
+        if "ask_history" not in st.session_state:
+            st.session_state.ask_history = []
+
+        # Display chat history
+        for entry in st.session_state.ask_history:
+            st.markdown(f"**🧑 You:** {entry['question']}")
+            st.markdown(entry["answer"])
+            st.markdown("---")
+
+        # Input
+        user_question = st.text_input("💬 Ask a question about your data:",
+                                       placeholder="e.g., Why is Vietnam's pass rate low?",
+                                       key="nlq_input")
+
+        ask_col1, ask_col2 = st.columns([1, 5])
+        with ask_col1:
+            ask_btn = st.button("Ask", type="primary", use_container_width=True)
+        with ask_col2:
+            if st.button("Clear History", use_container_width=False):
+                st.session_state.ask_history = []
+                st.rerun()
+
+        if ask_btn and user_question:
+            answer = process_natural_query(user_question, df, metrics, kpis)
+            st.session_state.ask_history.append({
+                "question": user_question,
+                "answer": answer
+            })
+            st.rerun()
+
+        # Quick-ask buttons for common questions
+        st.markdown("")
+        st.markdown("**Quick questions:**")
+        quick_col1, quick_col2, quick_col3 = st.columns(3)
+        with quick_col1:
+            if st.button("📊 Overall pass rate", use_container_width=True, key="quick_pass"):
+                answer = process_natural_query("What is the overall pass rate?", df, metrics, kpis)
+                st.session_state.ask_history.append({"question": "What is the overall pass rate?", "answer": answer})
+                st.rerun()
+        with quick_col2:
+            if st.button("🌏 Compare markets", use_container_width=True, key="quick_compare"):
+                answer = process_natural_query("Compare all markets", df, metrics, kpis)
+                st.session_state.ask_history.append({"question": "Compare all markets", "answer": answer})
+                st.rerun()
+        with quick_col3:
+            if st.button("🏆 Top accounts", use_container_width=True, key="quick_top"):
+                answer = process_natural_query("Top 5 accounts by pass rate", df, metrics, kpis)
+                st.session_state.ask_history.append({"question": "Top 5 accounts by pass rate", "answer": answer})
+                st.rerun()
+
+        quick_col4, quick_col5, quick_col6 = st.columns(3)
+        with quick_col4:
+            if st.button("👤 Trainer breakdown", use_container_width=True, key="quick_trainer"):
+                answer = process_natural_query("Show me trainer performance", df, metrics, kpis)
+                st.session_state.ask_history.append({"question": "Show me trainer performance", "answer": answer})
+                st.rerun()
+        with quick_col5:
+            if st.button("📈 Attach rate impact", use_container_width=True, key="quick_attach"):
+                answer = process_natural_query("What is the attach rate improvement?", df, metrics, kpis)
+                st.session_state.ask_history.append({"question": "What is the attach rate improvement?", "answer": answer})
+                st.rerun()
+        with quick_col6:
+            if st.button("📋 Data summary", use_container_width=True, key="quick_summary"):
+                answer = process_natural_query("How many total records and learners?", df, metrics, kpis)
+                st.session_state.ask_history.append({"question": "How many total records and learners?", "answer": answer})
+                st.rerun()
 
         # Country and Account breakdown side by side
         st.markdown("")
@@ -1553,91 +1635,7 @@ if df is not None and len(df) > 0:
             st.plotly_chart(fig, use_container_width=True)
 
 
-    # === TAB 4: ASK THE DATA ===
-    with tab_ask:
-        st.markdown('<div class="section-header">🤖 Ask the Data</div>', unsafe_allow_html=True)
-        st.markdown("""
-        <div class="insight-box">
-        Ask questions about your training data in plain English. Examples:<br>
-        • "Why do we have a low passing rate for Vietnam?"<br>
-        • "Top 5 stores by pass rate"<br>
-        • "Compare markets"<br>
-        • "What's the pass rate for Samsung?"<br>
-        • "How many trainees in PH?"<br>
-        • "Which trainer has the most sessions?"
-        </div>
-        """, unsafe_allow_html=True)
-
-        # Chat history in session state
-        if "ask_history" not in st.session_state:
-            st.session_state.ask_history = []
-
-        # Display chat history
-        for entry in st.session_state.ask_history:
-            st.markdown(f"**🧑 You:** {entry['question']}")
-            st.markdown(entry["answer"])
-            st.markdown("---")
-
-        # Input
-        user_question = st.text_input("💬 Ask a question about your data:",
-                                       placeholder="e.g., Why is Vietnam's pass rate low?",
-                                       key="nlq_input")
-
-        ask_col1, ask_col2 = st.columns([1, 5])
-        with ask_col1:
-            ask_btn = st.button("Ask", type="primary", use_container_width=True)
-        with ask_col2:
-            if st.button("Clear History", use_container_width=False):
-                st.session_state.ask_history = []
-                st.rerun()
-
-        if ask_btn and user_question:
-            answer = process_natural_query(user_question, df, metrics, kpis)
-            st.session_state.ask_history.append({
-                "question": user_question,
-                "answer": answer
-            })
-            st.rerun()
-
-        # Quick-ask buttons for common questions
-        st.markdown("")
-        st.markdown("**Quick questions:**")
-        quick_col1, quick_col2, quick_col3 = st.columns(3)
-        with quick_col1:
-            if st.button("📊 Overall pass rate", use_container_width=True, key="quick_pass"):
-                answer = process_natural_query("What is the overall pass rate?", df, metrics, kpis)
-                st.session_state.ask_history.append({"question": "What is the overall pass rate?", "answer": answer})
-                st.rerun()
-        with quick_col2:
-            if st.button("🌏 Compare markets", use_container_width=True, key="quick_compare"):
-                answer = process_natural_query("Compare all markets", df, metrics, kpis)
-                st.session_state.ask_history.append({"question": "Compare all markets", "answer": answer})
-                st.rerun()
-        with quick_col3:
-            if st.button("🏆 Top accounts", use_container_width=True, key="quick_top"):
-                answer = process_natural_query("Top 5 accounts by pass rate", df, metrics, kpis)
-                st.session_state.ask_history.append({"question": "Top 5 accounts by pass rate", "answer": answer})
-                st.rerun()
-
-        quick_col4, quick_col5, quick_col6 = st.columns(3)
-        with quick_col4:
-            if st.button("👤 Trainer breakdown", use_container_width=True, key="quick_trainer"):
-                answer = process_natural_query("Show me trainer performance", df, metrics, kpis)
-                st.session_state.ask_history.append({"question": "Show me trainer performance", "answer": answer})
-                st.rerun()
-        with quick_col5:
-            if st.button("📈 Attach rate impact", use_container_width=True, key="quick_attach"):
-                answer = process_natural_query("What is the attach rate improvement?", df, metrics, kpis)
-                st.session_state.ask_history.append({"question": "What is the attach rate improvement?", "answer": answer})
-                st.rerun()
-        with quick_col6:
-            if st.button("📋 Data summary", use_container_width=True, key="quick_summary"):
-                answer = process_natural_query("How many total records and learners?", df, metrics, kpis)
-                st.session_state.ask_history.append({"question": "How many total records and learners?", "answer": answer})
-                st.rerun()
-
-
-    # === TAB 5: DATA & EXPORT ===
+    # === TAB 4: DATA & EXPORT ===
     with tab_data:
         data_col1, data_col2 = st.columns([3, 1])
 
