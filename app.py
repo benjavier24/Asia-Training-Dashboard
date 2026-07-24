@@ -505,7 +505,7 @@ def compute_kpis(df, metrics):
     kpis["Total Participants"] = len(df)
 
     if metrics.get("Assessment Score"):
-        scores = df["Assessment Score"].dropna()
+        scores = pd.to_numeric(df["Assessment Score"], errors="coerce").dropna()
         if len(scores) > 0:
             avg = scores.mean()
             if avg <= 1:
@@ -513,8 +513,9 @@ def compute_kpis(df, metrics):
             kpis["Avg Assessment Score"] = round(avg, 1)
 
     if metrics.get("Pass Flag"):
-        total = df["Pass Flag"].notna().sum()
-        passed = df["Pass Flag"].sum()
+        pass_flags = pd.to_numeric(df["Pass Flag"], errors="coerce")
+        total = pass_flags.notna().sum()
+        passed = pass_flags.sum()
         if total > 0:
             kpis["Pass Rate"] = round(passed / total * 100, 1)
             kpis["Total Passed"] = int(passed)
@@ -527,19 +528,19 @@ def compute_kpis(df, metrics):
             kpis["Total Passed"] = int(passed)
 
     if metrics.get("Total Invited") and metrics.get("Total Attended"):
-        invited = df["Total Invited"].sum()
-        attended = df["Total Attended"].sum()
+        invited = pd.to_numeric(df["Total Invited"], errors="coerce").sum()
+        attended = pd.to_numeric(df["Total Attended"], errors="coerce").sum()
         if invited > 0:
             kpis["Attendance Rate"] = round(attended / invited * 100, 1)
 
     if metrics.get("Attach Rate Before"):
-        vals = df["Attach Rate Before"].dropna()
+        vals = pd.to_numeric(df["Attach Rate Before"], errors="coerce").dropna()
         if len(vals) > 0:
             avg = vals.mean()
             kpis["Avg Attach Before"] = round(avg * 100 if avg <= 1 else avg, 1)
 
     if metrics.get("Attach Rate After"):
-        vals = df["Attach Rate After"].dropna()
+        vals = pd.to_numeric(df["Attach Rate After"], errors="coerce").dropna()
         if len(vals) > 0:
             avg = vals.mean()
             kpis["Avg Attach After"] = round(avg * 100 if avg <= 1 else avg, 1)
@@ -1031,6 +1032,78 @@ def generate_sample_data():
     df.loc[attach_idx, "Attach Rate After"] = df.loc[attach_idx, "Attach Rate Before"] + np.random.uniform(0.01, 0.10, 40).round(3)
 
     return df
+
+
+def compute_store_completion(df, duration_days=30, reference_date=None):
+    """Compute store completion status within a given duration.
+    
+    A store is considered 'completed' if it has at least one training session
+    within the specified duration window (from reference_date - duration_days to reference_date).
+    
+    Returns:
+        dict with:
+        - completed_stores: list of store names that have been trained
+        - pending_stores: list of store names not yet trained in the window
+        - total_stores: total unique stores in entire dataset
+        - completed_count: number of completed stores
+        - pending_count: number of pending stores
+        - completion_rate: percentage of stores completed
+        - store_details: DataFrame with per-store completion info
+    """
+    if "Store" not in df.columns or "Date" not in df.columns:
+        return None
+    
+    if reference_date is None:
+        reference_date = df["Date"].max()
+    else:
+        reference_date = pd.Timestamp(reference_date)
+    
+    start_date = reference_date - pd.Timedelta(days=duration_days)
+    
+    # All unique stores in the full dataset (the "universe" of stores to cover)
+    all_stores = df["Store"].dropna().unique().tolist()
+    
+    # Stores that have training within the duration window
+    window_df = df[(df["Date"] >= start_date) & (df["Date"] <= reference_date)]
+    completed_stores = window_df["Store"].dropna().unique().tolist()
+    
+    # Pending stores = all stores minus completed ones
+    pending_stores = [s for s in all_stores if s not in completed_stores]
+    
+    total = len(all_stores)
+    completed_count = len(completed_stores)
+    pending_count = len(pending_stores)
+    completion_rate = round((completed_count / total * 100), 1) if total > 0 else 0.0
+    
+    # Build detail DataFrame
+    store_details = []
+    for store in all_stores:
+        store_df = df[df["Store"] == store]
+        window_store_df = window_df[window_df["Store"] == store]
+        last_training = store_df["Date"].max()
+        sessions_in_window = len(window_store_df)
+        status = "✅ Completed" if store in completed_stores else "⏳ Pending"
+        store_details.append({
+            "Store": store,
+            "Status": status,
+            "Sessions in Window": sessions_in_window,
+            "Last Training Date": last_training,
+            "Days Since Last Training": (reference_date - last_training).days if pd.notna(last_training) else None
+        })
+    
+    store_details_df = pd.DataFrame(store_details).sort_values("Status", ascending=False)
+    
+    return {
+        "completed_stores": completed_stores,
+        "pending_stores": pending_stores,
+        "total_stores": total,
+        "completed_count": completed_count,
+        "pending_count": pending_count,
+        "completion_rate": completion_rate,
+        "store_details": store_details_df,
+        "start_date": start_date,
+        "end_date": reference_date,
+    }
 
 
 def render_kpi_card(label, value, delta=None, delta_type="neutral"):
@@ -1600,6 +1673,89 @@ if df is not None and len(df) > 0:
                     st.markdown("**⚠️ Needs Attention**")
                     for _, row in store_data.nsmallest(3, "Pass Rate").iterrows():
                         st.markdown(f'• {row["Store"]} — **{row["Pass Rate"]:.0f}%**')
+
+
+        # Store Completion Tracker
+        if metrics.get("Store") and metrics.get("Date"):
+            st.markdown('<div class="section-header">🏪 Store Completion Tracker</div>', unsafe_allow_html=True)
+            st.markdown("""
+            <div class="insight-box">
+            Track how many stores have been trained within a chosen time window. 
+            <b>Completed</b> = at least one training session within the period. <b>Pending</b> = no training yet in that window.
+            </div>
+            """, unsafe_allow_html=True)
+
+            comp_col1, comp_col2 = st.columns([1, 1])
+            with comp_col1:
+                duration_days = st.slider("📅 Duration window (days)", min_value=7, max_value=180, value=30, step=7,
+                                          help="How many days back from the reference date to check for store visits")
+            with comp_col2:
+                max_date = df["Date"].max().date()
+                min_date = df["Date"].min().date()
+                ref_date = st.date_input("📌 Reference date (end of window)", value=max_date,
+                                         min_value=min_date, max_value=max_date,
+                                         help="The end date of the measurement window")
+
+            completion = compute_store_completion(df, duration_days=duration_days, reference_date=ref_date)
+
+            if completion:
+                # KPI row
+                comp_kpi1, comp_kpi2, comp_kpi3, comp_kpi4 = st.columns(4)
+                with comp_kpi1:
+                    st.markdown(render_kpi_card("Total Stores", str(completion["total_stores"])), unsafe_allow_html=True)
+                with comp_kpi2:
+                    delta_type = "positive" if completion["completion_rate"] >= 70 else "negative" if completion["completion_rate"] < 50 else "neutral"
+                    st.markdown(render_kpi_card("Completed", str(completion["completed_count"]),
+                                               f"{completion['completion_rate']}%", delta_type), unsafe_allow_html=True)
+                with comp_kpi3:
+                    delta_type = "negative" if completion["pending_count"] > completion["completed_count"] else "neutral"
+                    st.markdown(render_kpi_card("Pending", str(completion["pending_count"]),
+                                               f"{100 - completion['completion_rate']}% remaining", delta_type), unsafe_allow_html=True)
+                with comp_kpi4:
+                    st.markdown(render_kpi_card("Window",
+                                               f"{duration_days}d",
+                                               f"{completion['start_date'].strftime('%b %d')} → {completion['end_date'].strftime('%b %d')}"),
+                                unsafe_allow_html=True)
+
+                # Visual: donut chart + detail table
+                comp_viz1, comp_viz2 = st.columns([1, 2])
+
+                with comp_viz1:
+                    fig_donut = go.Figure(data=[go.Pie(
+                        labels=["Completed", "Pending"],
+                        values=[completion["completed_count"], completion["pending_count"]],
+                        hole=0.6,
+                        marker_colors=["#00BAC7", "#e74c3c"],
+                        textinfo="label+value",
+                        textfont_size=13
+                    )])
+                    fig_donut.update_layout(
+                        height=280,
+                        margin=dict(l=10, r=10, t=10, b=10),
+                        showlegend=False,
+                        annotations=[dict(text=f"{completion['completion_rate']}%", x=0.5, y=0.5,
+                                          font_size=24, font_color="#00BAC7", showarrow=False)]
+                    )
+                    st.plotly_chart(fig_donut, use_container_width=True)
+
+                with comp_viz2:
+                    detail_df = completion["store_details"].copy()
+                    detail_df["Last Training Date"] = pd.to_datetime(detail_df["Last Training Date"]).dt.strftime("%b %d, %Y")
+                    col_config = {
+                        "Sessions in Window": st.column_config.NumberColumn("Sessions", format="%d"),
+                        "Days Since Last Training": st.column_config.NumberColumn("Days Since", format="%d days"),
+                    }
+                    st.dataframe(detail_df, use_container_width=True, height=280, column_config=col_config)
+
+                # Show pending stores list if any
+                if completion["pending_stores"]:
+                    with st.expander(f"⏳ View {completion['pending_count']} Pending Stores", expanded=False):
+                        pending_cols = st.columns(3)
+                        for i, store in enumerate(sorted(completion["pending_stores"])):
+                            with pending_cols[i % 3]:
+                                st.markdown(f"• {store}")
+            else:
+                st.warning("Store and Date columns are required for completion tracking.")
 
 
     # === TAB 3: TRENDS ===
