@@ -1244,7 +1244,9 @@ if df is not None and len(df) > 0:
         if metrics.get("Date") and len(df) > 0:
             min_date = df["Date"].min().date()
             max_date = df["Date"].max().date()
-            date_range = st.date_input("📅 Date Range", value=(min_date, max_date),
+            from datetime import date as _date
+            default_start = max(min_date, _date(2026, 1, 1))
+            date_range = st.date_input("📅 Date Range", value=(default_start, max_date),
                                        min_value=min_date, max_value=max_date)
             if len(date_range) == 2:
                 df = df[(df["Date"].dt.date >= date_range[0]) & (df["Date"].dt.date <= date_range[1])]
