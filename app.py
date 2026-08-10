@@ -1242,14 +1242,42 @@ if df is not None and len(df) > 0:
 
         # Date range
         if metrics.get("Date") and len(df) > 0:
+            from datetime import date as _date, timedelta
             min_date = df["Date"].min().date()
             max_date = df["Date"].max().date()
-            from datetime import date as _date
-            default_start = max(min_date, _date(2026, 1, 1))
-            date_range = st.date_input("📅 Date Range", value=(default_start, max_date),
-                                       min_value=min_date, max_value=max_date)
-            if len(date_range) == 2:
-                df = df[(df["Date"].dt.date >= date_range[0]) & (df["Date"].dt.date <= date_range[1])]
+            today = _date.today()
+
+            # Preset date range options
+            date_presets = {
+                "Year to Date (2026)": (_date(2026, 1, 1), today),
+                "This Month": (_date(today.year, today.month, 1), today),
+                "Last 30 Days": (today - timedelta(days=30), today),
+                "Last 90 Days": (today - timedelta(days=90), today),
+                "This Quarter": (_date(today.year, ((today.month - 1) // 3) * 3 + 1, 1), today),
+                "Last 6 Months": (today - timedelta(days=180), today),
+                "This Year": (_date(today.year, 1, 1), today),
+                "All Time": (min_date, max_date),
+                "Custom": None,
+            }
+
+            selected_preset = st.selectbox(
+                "📅 Date Range",
+                options=list(date_presets.keys()),
+                index=0
+            )
+
+            if selected_preset == "Custom":
+                date_range = st.date_input("Select range", value=(_date(2026, 1, 1), max_date),
+                                           min_value=min_date, max_value=max_date)
+                if len(date_range) == 2:
+                    df = df[(df["Date"].dt.date >= date_range[0]) & (df["Date"].dt.date <= date_range[1])]
+            else:
+                start, end = date_presets[selected_preset]
+                # Clamp to available data range
+                start = max(start, min_date)
+                end = min(end, max_date)
+                st.caption(f"{start.strftime('%Y/%m/%d')} – {end.strftime('%Y/%m/%d')}")
+                df = df[(df["Date"].dt.date >= start) & (df["Date"].dt.date <= end)]
 
         # Country / Market
         if metrics.get("Country") and len(df) > 0:
