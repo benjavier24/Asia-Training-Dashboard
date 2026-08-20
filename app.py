@@ -1661,16 +1661,33 @@ if df is not None and len(df) > 0:
 
             with store_col1:
                 store_agg = {"Records": ("Store", "count")}
-                if metrics.get("Pass Flag"):
-                    store_agg["Pass Rate"] = ("Pass Flag", "mean")
-                if metrics.get("Assessment Score"):
-                    store_agg["Avg Score"] = ("Assessment Score", "mean")
-                if metrics.get("Attach Rate Before"):
-                    store_agg["Attach Before"] = ("Attach Rate Before", "mean")
-                if metrics.get("Attach Rate After"):
-                    store_agg["Attach After"] = ("Attach Rate After", "mean")
+                if metrics.get("Pass Flag") and "Pass Flag" in df.columns:
+                    try:
+                        df["Pass Flag"] = pd.to_numeric(df["Pass Flag"], errors="coerce")
+                        store_agg["Pass Rate"] = ("Pass Flag", "mean")
+                    except Exception:
+                        pass
+                if metrics.get("Assessment Score") and "Assessment Score" in df.columns:
+                    try:
+                        df["Assessment Score"] = pd.to_numeric(df["Assessment Score"], errors="coerce")
+                        store_agg["Avg Score"] = ("Assessment Score", "mean")
+                    except Exception:
+                        pass
+                if metrics.get("Attach Rate Before") and "Attach Rate Before" in df.columns:
+                    try:
+                        df["Attach Rate Before"] = pd.to_numeric(df["Attach Rate Before"], errors="coerce")
+                        store_agg["Attach Before"] = ("Attach Rate Before", "mean")
+                    except Exception:
+                        pass
+                if metrics.get("Attach Rate After") and "Attach Rate After" in df.columns:
+                    try:
+                        df["Attach Rate After"] = pd.to_numeric(df["Attach Rate After"], errors="coerce")
+                        store_agg["Attach After"] = ("Attach Rate After", "mean")
+                    except Exception:
+                        pass
 
-                store_data = df.groupby(["Store"] + (["Account"] if metrics.get("Account") else [])).agg(**store_agg).reset_index()
+                groupby_cols = ["Store"] + (["Account"] if metrics.get("Account") and "Account" in df.columns else [])
+                store_data = df.groupby(groupby_cols).agg(**store_agg).reset_index()
 
                 if "Pass Rate" in store_data.columns:
                     store_data["Pass Rate"] = (store_data["Pass Rate"] * 100).round(1)
