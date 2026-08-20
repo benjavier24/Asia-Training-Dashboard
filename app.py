@@ -40,7 +40,7 @@ st.markdown("""
     .kpi-card {
         background: var(--background-color, rgba(255,255,255,0.05));
         border-radius: 12px;
-        padding: 20px 16px;
+        padding: 20px 12px;
         text-align: center;
         border: 1px solid rgba(0,186,199,0.3);
         height: 140px;
@@ -48,13 +48,17 @@ st.markdown("""
         flex-direction: column;
         justify-content: center;
         align-items: center;
+        overflow: hidden;
     }
     .kpi-value {
-        font-size: 2.2rem;
+        font-size: clamp(1.2rem, 4vw, 1.8rem);
         font-weight: 800;
         color: #00BAC7;
         line-height: 1.1;
         margin: 8px 0 4px;
+        word-break: break-word;
+        overflow-wrap: break-word;
+        max-width: 100%;
     }
     .kpi-label {
         font-size: 0.8rem;
