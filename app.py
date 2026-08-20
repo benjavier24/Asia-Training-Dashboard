@@ -43,7 +43,11 @@ st.markdown("""
         padding: 20px 16px;
         text-align: center;
         border: 1px solid rgba(0,186,199,0.3);
-        height: 100%;
+        height: 140px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
     }
     .kpi-value {
         font-size: 2.2rem;
@@ -1380,38 +1384,50 @@ if df is not None and len(df) > 0:
         delta_type = "positive" if kpis.get("Avg Assessment Score", 0) >= 75 else "negative" if kpis.get("Avg Assessment Score", 0) < 60 else "neutral"
         st.markdown(render_kpi_card("Product Knowledge", val, "avg assessment score", delta_type), unsafe_allow_html=True)
 
-    # Row 2: Attach Rate Impact + supporting context
+    # Row 2: Attach Rate + coverage (same 5-column grid as Row 1)
     st.markdown("")
-    attach_col1, attach_col2, attach_col3, attach_col4 = st.columns(4)
+    sec_col1, sec_col2, sec_col3, sec_col4, sec_col5 = st.columns(5)
 
-    with attach_col1:
+    with sec_col1:
         if "Avg Attach Before" in kpis:
             val = f"{kpis['Avg Attach Before']}%"
         else:
             val = "N/A"
         st.markdown(render_kpi_card("Attach Rate Before", val, "pre-training baseline"), unsafe_allow_html=True)
 
-    with attach_col2:
+    with sec_col2:
         if "Avg Attach After" in kpis:
             val = f"{kpis['Avg Attach After']}%"
+            imp = kpis.get("Attach Improvement", 0)
+            delta = f"+{imp}pp vs before" if imp > 0 else f"{imp}pp vs before"
+            delta_type = "positive" if imp > 0 else "negative" if imp < 0 else "neutral"
         else:
             val = "N/A"
-        st.markdown(render_kpi_card("Attach Rate After", val, "30 days post-training"), unsafe_allow_html=True)
-
-    with attach_col3:
-        if "Attach Improvement" in kpis:
-            imp = kpis["Attach Improvement"]
-            val = f"+{imp}pp" if imp > 0 else f"{imp}pp"
-            delta_type = "positive" if imp > 0 else "negative"
-        else:
-            val = "N/A"
+            delta = "30 days post-training"
             delta_type = "neutral"
-        st.markdown(render_kpi_card("Attach Lift", val, "improvement from training", delta_type), unsafe_allow_html=True)
+        st.markdown(render_kpi_card("Attach Rate After", val, delta, delta_type), unsafe_allow_html=True)
 
-    with attach_col4:
+    with sec_col3:
         val = f"{kpis.get('Countries', 0)}"
-        accts = kpis.get('Accounts', 0)
-        st.markdown(render_kpi_card("Markets / Partners", val, f"{accts} active partners"), unsafe_allow_html=True)
+        st.markdown(render_kpi_card("Markets", val, "countries covered"), unsafe_allow_html=True)
+
+    with sec_col4:
+        val = f"{kpis.get('Accounts', 0)}"
+        st.markdown(render_kpi_card("Partners", val, "active accounts"), unsafe_allow_html=True)
+
+    with sec_col5:
+        if metrics.get("Training Type") and len(df) > 0:
+            method_counts = df["Training Type"].value_counts()
+            top_method = method_counts.index[0] if len(method_counts) > 0 else "N/A"
+            val = top_method
+            delta = f"{method_counts.iloc[0]:,} sessions"
+            st.markdown(render_kpi_card("Top Method", val, delta), unsafe_allow_html=True)
+        elif "Total Training Hours" in kpis:
+            val = f"{kpis['Total Training Hours']:,.0f}"
+            st.markdown(render_kpi_card("Training Hours", val), unsafe_allow_html=True)
+        else:
+            val = f"{len(df):,}"
+            st.markdown(render_kpi_card("Total Records", val, "in filtered view"), unsafe_allow_html=True)
 
 
     # ─── TABBED CONTENT SECTIONS ───
