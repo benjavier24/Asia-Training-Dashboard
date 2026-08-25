@@ -1239,6 +1239,14 @@ if df is not None and len(df) > 0:
     df = normalize_columns(df)
     metrics = detect_metrics(df)
 
+    # Coerce numeric columns upfront to prevent TypeError in all downstream .agg() calls
+    numeric_cols = ["Pass Flag", "Fail Flag", "Assessment Score", "Attach Rate Before",
+                    "Attach Rate After", "Attach Lift", "Training Hours",
+                    "Total Invited", "Total Attended", "Total Passed"]
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
     # Parse dates
     if metrics.get("Date"):
         df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
@@ -1457,16 +1465,12 @@ if df is not None and len(df) > 0:
         if metrics.get("Store"):
             acct_breakdown_agg["Stores"] = ("Store", "nunique")
         if metrics.get("Pass Flag") and "Pass Flag" in df.columns:
-            df["Pass Flag"] = pd.to_numeric(df["Pass Flag"], errors="coerce")
             acct_breakdown_agg["Pass Rate"] = ("Pass Flag", "mean")
         if metrics.get("Assessment Score") and "Assessment Score" in df.columns:
-            df["Assessment Score"] = pd.to_numeric(df["Assessment Score"], errors="coerce")
             acct_breakdown_agg["Avg Score"] = ("Assessment Score", "mean")
         if metrics.get("Attach Rate Before") and "Attach Rate Before" in df.columns:
-            df["Attach Rate Before"] = pd.to_numeric(df["Attach Rate Before"], errors="coerce")
             acct_breakdown_agg["AR Before"] = ("Attach Rate Before", "mean")
         if metrics.get("Attach Rate After") and "Attach Rate After" in df.columns:
-            df["Attach Rate After"] = pd.to_numeric(df["Attach Rate After"], errors="coerce")
             acct_breakdown_agg["AR After"] = ("Attach Rate After", "mean")
 
         acct_breakdown = df.groupby("Account").agg(**acct_breakdown_agg).reset_index()
@@ -1970,29 +1974,13 @@ if df is not None and len(df) > 0:
             with store_col1:
                 store_agg = {"Records": ("Store", "count")}
                 if metrics.get("Pass Flag") and "Pass Flag" in df.columns:
-                    try:
-                        df["Pass Flag"] = pd.to_numeric(df["Pass Flag"], errors="coerce")
-                        store_agg["Pass Rate"] = ("Pass Flag", "mean")
-                    except Exception:
-                        pass
+                    store_agg["Pass Rate"] = ("Pass Flag", "mean")
                 if metrics.get("Assessment Score") and "Assessment Score" in df.columns:
-                    try:
-                        df["Assessment Score"] = pd.to_numeric(df["Assessment Score"], errors="coerce")
-                        store_agg["Avg Score"] = ("Assessment Score", "mean")
-                    except Exception:
-                        pass
+                    store_agg["Avg Score"] = ("Assessment Score", "mean")
                 if metrics.get("Attach Rate Before") and "Attach Rate Before" in df.columns:
-                    try:
-                        df["Attach Rate Before"] = pd.to_numeric(df["Attach Rate Before"], errors="coerce")
-                        store_agg["Attach Before"] = ("Attach Rate Before", "mean")
-                    except Exception:
-                        pass
+                    store_agg["Attach Before"] = ("Attach Rate Before", "mean")
                 if metrics.get("Attach Rate After") and "Attach Rate After" in df.columns:
-                    try:
-                        df["Attach Rate After"] = pd.to_numeric(df["Attach Rate After"], errors="coerce")
-                        store_agg["Attach After"] = ("Attach Rate After", "mean")
-                    except Exception:
-                        pass
+                    store_agg["Attach After"] = ("Attach Rate After", "mean")
 
                 groupby_cols = ["Store"] + (["Account"] if metrics.get("Account") and "Account" in df.columns else [])
                 store_data = df.groupby(groupby_cols).agg(**store_agg).reset_index()
