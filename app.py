@@ -1456,13 +1456,17 @@ if df is not None and len(df) > 0:
             acct_breakdown_agg["Frontliners"] = ("Trainee Name", "nunique")
         if metrics.get("Store"):
             acct_breakdown_agg["Stores"] = ("Store", "nunique")
-        if metrics.get("Pass Flag"):
+        if metrics.get("Pass Flag") and "Pass Flag" in df.columns:
+            df["Pass Flag"] = pd.to_numeric(df["Pass Flag"], errors="coerce")
             acct_breakdown_agg["Pass Rate"] = ("Pass Flag", "mean")
-        if metrics.get("Assessment Score"):
+        if metrics.get("Assessment Score") and "Assessment Score" in df.columns:
+            df["Assessment Score"] = pd.to_numeric(df["Assessment Score"], errors="coerce")
             acct_breakdown_agg["Avg Score"] = ("Assessment Score", "mean")
-        if metrics.get("Attach Rate Before"):
+        if metrics.get("Attach Rate Before") and "Attach Rate Before" in df.columns:
+            df["Attach Rate Before"] = pd.to_numeric(df["Attach Rate Before"], errors="coerce")
             acct_breakdown_agg["AR Before"] = ("Attach Rate Before", "mean")
-        if metrics.get("Attach Rate After"):
+        if metrics.get("Attach Rate After") and "Attach Rate After" in df.columns:
+            df["Attach Rate After"] = pd.to_numeric(df["Attach Rate After"], errors="coerce")
             acct_breakdown_agg["AR After"] = ("Attach Rate After", "mean")
 
         acct_breakdown = df.groupby("Account").agg(**acct_breakdown_agg).reset_index()
