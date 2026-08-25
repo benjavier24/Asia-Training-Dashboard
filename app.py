@@ -1537,7 +1537,14 @@ if df is not None and len(df) > 0:
                         trainer_lines = ""
                         for rank, (trainer, count) in enumerate(top_trainers.items()):
                             trainer_lines += f'<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;"><span>{medals[rank]} {trainer}</span><span style="opacity:0.6;font-size:0.75rem;">{int(count)} sessions</span></div>'
-                        suffix = f'<div style="opacity:0.5;font-size:0.7rem;margin-top:2px;">+{len(acct_trainer_counts) - 5} more trainers</div>' if len(acct_trainer_counts) > 5 else ""
+                        # Expandable section for remaining trainers
+                        suffix = ""
+                        if len(acct_trainer_counts) > 5:
+                            remaining = acct_trainer_counts.iloc[5:]
+                            remaining_lines = ""
+                            for rank_offset, (trainer, count) in enumerate(remaining.items(), start=6):
+                                remaining_lines += f'<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;"><span>{rank_offset}. {trainer}</span><span style="opacity:0.6;font-size:0.75rem;">{int(count)} sessions</span></div>'
+                            suffix = f'<details style="margin-top:4px;cursor:pointer;"><summary style="opacity:0.6;font-size:0.7rem;list-style:none;">▸ +{len(remaining)} more trainers</summary>{remaining_lines}</details>'
                         parts.append(f'<div style="margin-top:4px;border-top:1px solid rgba(0,186,199,0.15);padding-top:6px;"><span style="font-size:0.75rem;opacity:0.6;">TRAINERS</span>{trainer_lines}{suffix}</div>')
 
                 st.markdown(f"""
