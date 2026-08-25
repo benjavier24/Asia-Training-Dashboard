@@ -21,6 +21,34 @@ st.markdown("""
     /* Force light theme feel */
     .stApp {
         background: linear-gradient(135deg, #f5f7fa 0%, #e8ecf1 100%);
+        color: #1a1a2e !important;
+    }
+
+    /* Force all text to dark on light background regardless of system theme */
+    .stApp, .stApp p, .stApp span, .stApp li, .stApp label, .stApp div,
+    .stMarkdown, .stMarkdown p, .stMarkdown span,
+    [data-testid="stMarkdownContainer"],
+    [data-testid="stMarkdownContainer"] p,
+    [data-testid="stMarkdownContainer"] span,
+    [data-testid="stMarkdownContainer"] li,
+    [data-testid="stMarkdownContainer"] h1,
+    [data-testid="stMarkdownContainer"] h2,
+    [data-testid="stMarkdownContainer"] h3 {
+        color: #1a1a2e !important;
+    }
+
+    /* Sidebar text */
+    [data-testid="stSidebar"],
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] span,
+    [data-testid="stSidebar"] label,
+    [data-testid="stSidebar"] div {
+        color: #374151 !important;
+    }
+
+    /* Caption / muted text */
+    .stCaption, [data-testid="stCaptionContainer"] {
+        color: #6b7280 !important;
     }
 
     .main-header {
@@ -64,7 +92,7 @@ st.markdown("""
     .kpi-value {
         font-size: clamp(1.2rem, 4vw, 1.8rem);
         font-weight: 800;
-        color: #00BAC7;
+        color: #00BAC7 !important;
         line-height: 1.1;
         margin: 8px 0 4px;
         word-break: break-word;
@@ -76,15 +104,15 @@ st.markdown("""
         text-transform: uppercase;
         letter-spacing: 0.8px;
         font-weight: 600;
-        color: #6b7280;
+        color: #6b7280 !important;
     }
     .kpi-delta {
         font-size: 0.72rem;
         margin-top: 4px;
-        color: #9ca3af;
+        color: #9ca3af !important;
     }
-    .kpi-delta.positive { color: #10b981; font-weight: 600; }
-    .kpi-delta.negative { color: #ef4444; font-weight: 600; }
+    .kpi-delta.positive { color: #10b981 !important; font-weight: 600; }
+    .kpi-delta.negative { color: #ef4444 !important; font-weight: 600; }
 
     /* Hero banner for context */
     .hero-banner {
@@ -114,7 +142,7 @@ st.markdown("""
         padding: 14px 18px;
         border-left: 4px solid #00BAC7;
         margin: 6px 0;
-        color: #374151;
+        color: #374151 !important;
         font-size: 0.88rem;
         box-shadow: 0 1px 6px rgba(0,0,0,0.04);
     }
@@ -124,18 +152,18 @@ st.markdown("""
         padding: 14px 18px;
         border-left: 4px solid #f59e0b;
         margin: 6px 0;
-        color: #374151;
+        color: #374151 !important;
         font-size: 0.88rem;
         box-shadow: 0 1px 6px rgba(0,0,0,0.04);
     }
-    .positive { color: #10b981; font-weight: 600; }
-    .negative { color: #ef4444; font-weight: 600; }
+    .positive { color: #10b981 !important; font-weight: 600; }
+    .negative { color: #ef4444 !important; font-weight: 600; }
 
     /* Section headers */
     .section-header {
         font-size: 1.05rem;
         font-weight: 700;
-        color: #1a1a2e;
+        color: #1a1a2e !important;
         margin: 1.8rem 0 0.8rem;
         padding-bottom: 8px;
         border-bottom: 2px solid #e5e7eb;
@@ -178,7 +206,7 @@ st.markdown("""
     .account-card .name {
         font-weight: 600;
         font-size: 0.85rem;
-        color: #1a1a2e;
+        color: #1a1a2e !important;
     }
     .account-card .bar-bg {
         background: #e5e7eb;
