@@ -1662,8 +1662,10 @@ if df is not None and len(df) > 0:
                 parts = [f"**{acct_name}**", f"📋 {trainings:,} trainings"]
                 if "Frontliners" in row and row["Frontliners"] > 0:
                     parts.append(f"👥 {int(row['Frontliners']):,} frontliners")
-                elif "Frontliners" in row:
-                    parts.append(f"👥 N/A frontliners")
+                else:
+                    # No unique trainee data — count rows as participants trained
+                    acct_participants = len(breakdown_df[breakdown_df["Account"] == acct_name])
+                    parts.append(f"👥 {acct_participants:,} participants")
                 if "Stores" in row:
                     parts.append(f"🏪 {int(row['Stores']):,} stores")
                 if "Pass Rate" in row and pd.notna(row["Pass Rate"]):
