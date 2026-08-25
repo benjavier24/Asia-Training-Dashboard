@@ -1456,6 +1456,22 @@ if df is not None and len(df) > 0:
         st.markdown("---")
         st.markdown(f'<div class="section-header">🏢 {selected_market} — Account Breakdown</div>', unsafe_allow_html=True)
 
+        # Training Name filter for the account breakdown
+        breakdown_df = df.copy()
+        if metrics.get("Training Name") and len(df) > 0:
+            training_options = ["All Trainings"] + sorted(df["Training Name"].dropna().unique().tolist())
+            sel_breakdown_training = st.selectbox(
+                "📚 Filter by Training Program",
+                options=training_options,
+                index=0,
+                key="breakdown_training_filter"
+            )
+            if sel_breakdown_training != "All Trainings":
+                breakdown_df = df[df["Training Name"] == sel_breakdown_training]
+                st.caption(f"Showing data for: **{sel_breakdown_training}**")
+        else:
+            sel_breakdown_training = "All Trainings"
+
         # Build per-account summary
         acct_breakdown_agg = {"Trainings": ("Account", "count")}
         if metrics.get("Trainee Code"):
@@ -1464,16 +1480,16 @@ if df is not None and len(df) > 0:
             acct_breakdown_agg["Frontliners"] = ("Trainee Name", "nunique")
         if metrics.get("Store"):
             acct_breakdown_agg["Stores"] = ("Store", "nunique")
-        if metrics.get("Pass Flag") and "Pass Flag" in df.columns:
+        if metrics.get("Pass Flag") and "Pass Flag" in breakdown_df.columns:
             acct_breakdown_agg["Pass Rate"] = ("Pass Flag", "mean")
-        if metrics.get("Assessment Score") and "Assessment Score" in df.columns:
+        if metrics.get("Assessment Score") and "Assessment Score" in breakdown_df.columns:
             acct_breakdown_agg["Avg Score"] = ("Assessment Score", "mean")
-        if metrics.get("Attach Rate Before") and "Attach Rate Before" in df.columns:
+        if metrics.get("Attach Rate Before") and "Attach Rate Before" in breakdown_df.columns:
             acct_breakdown_agg["AR Before"] = ("Attach Rate Before", "mean")
-        if metrics.get("Attach Rate After") and "Attach Rate After" in df.columns:
+        if metrics.get("Attach Rate After") and "Attach Rate After" in breakdown_df.columns:
             acct_breakdown_agg["AR After"] = ("Attach Rate After", "mean")
 
-        acct_breakdown = df.groupby("Account").agg(**acct_breakdown_agg).reset_index()
+        acct_breakdown = breakdown_df.groupby("Account").agg(**acct_breakdown_agg).reset_index()
 
         # Fallback: if Frontliners is 0 for an account (no Trainee Code/Name data),
         # use the row count as a proxy for participants
@@ -1526,7 +1542,7 @@ if df is not None and len(df) > 0:
 
                 # Show trainers for this account (leaderboard style)
                 if metrics.get("Trainer"):
-                    acct_df = df[df["Account"] == acct_name]
+                    acct_df = breakdown_df[breakdown_df["Account"] == acct_name]
                     # Count unique sessions per trainer (by Training ID or Date)
                     if metrics.get("Training ID"):
                         acct_trainer_counts = acct_df.groupby("Trainer")["Training ID"].nunique().sort_values(ascending=False)
