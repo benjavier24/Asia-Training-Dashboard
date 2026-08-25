@@ -1520,6 +1520,14 @@ if df is not None and len(df) > 0:
                     color = "#2ecc71" if lift > 0 else "#e74c3c"
                     parts.append(f'📈 <span style="color:{color};font-weight:600;">{sign}{lift:.1f}pp</span> attach lift')
 
+                # Show trainers for this account
+                if metrics.get("Trainer"):
+                    acct_trainers = df[df["Account"] == acct_name]["Trainer"].dropna().unique()
+                    if len(acct_trainers) > 0:
+                        trainer_list = ", ".join(sorted(acct_trainers)[:5])
+                        suffix = f" +{len(acct_trainers) - 5} more" if len(acct_trainers) > 5 else ""
+                        parts.append(f'👤 <span style="opacity:0.85;">{trainer_list}{suffix}</span>')
+
                 st.markdown(f"""
                 <div style="background:rgba(0,186,199,0.06); border:1px solid rgba(0,186,199,0.2); border-radius:10px; padding:14px; margin-bottom:10px;">
                     {"<br>".join(parts)}
