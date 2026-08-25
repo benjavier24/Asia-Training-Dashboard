@@ -1343,6 +1343,22 @@ if df is not None and len(df) > 0:
     df = normalize_columns(df)
     metrics = detect_metrics(df)
 
+    # Normalize Training Type values (consolidate inconsistent entries)
+    if "Training Type" in df.columns:
+        training_type_map = {
+            "virtual/online": "Virtual/Online",
+            "online": "Virtual/Online",
+            "virtual": "Virtual/Online",
+            "face to face": "Face to Face",
+            "tatap muka/offline": "Face to Face",
+            "tatap muka / offline": "Face to Face",
+            "offline": "Face to Face",
+            "f2f": "Face to Face",
+        }
+        df["Training Type"] = df["Training Type"].apply(
+            lambda x: training_type_map.get(str(x).strip().lower(), x) if pd.notna(x) else x
+        )
+
     # Coerce numeric columns upfront to prevent TypeError in all downstream .agg() calls
     numeric_cols = ["Pass Flag", "Fail Flag", "Assessment Score", "Attach Rate Before",
                     "Attach Rate After", "Attach Lift", "Training Hours",
