@@ -1606,7 +1606,14 @@ if df is not None and len(df) > 0:
             sel_breakdown_training = "All Trainings"
 
         # Build per-account summary
-        acct_breakdown_agg = {"Trainings": ("Account", "count")}
+        # Count actual unique sessions, not rows
+        if metrics.get("Training ID"):
+            acct_breakdown_agg = {"Trainings": ("Training ID", "nunique")}
+        elif metrics.get("Date"):
+            acct_breakdown_agg = {"Trainings": ("Date", "nunique")}
+        else:
+            acct_breakdown_agg = {"Trainings": ("Account", "count")}
+
         if metrics.get("Trainee Code"):
             acct_breakdown_agg["Frontliners"] = ("Trainee Code", "nunique")
         elif metrics.get("Trainee Name"):
@@ -1624,12 +1631,8 @@ if df is not None and len(df) > 0:
 
         acct_breakdown = breakdown_df.groupby("Account").agg(**acct_breakdown_agg).reset_index()
 
-        # Fallback: if Frontliners is 0 for an account (no Trainee Code/Name data),
-        # use the row count as a proxy for participants
-        if "Frontliners" in acct_breakdown.columns:
-            for idx, row in acct_breakdown.iterrows():
-                if row["Frontliners"] == 0:
-                    acct_breakdown.at[idx, "Frontliners"] = int(row["Trainings"])
+        # If Frontliners is 0 but we don't have trainee data, show N/A instead of a fake number
+        # (don't fallback to row count — it's misleading)
 
         # Format percentages
         if "Pass Rate" in acct_breakdown.columns:
@@ -1657,8 +1660,10 @@ if df is not None and len(df) > 0:
                 acct_name = row["Account"]
                 trainings = int(row["Trainings"])
                 parts = [f"**{acct_name}**", f"📋 {trainings:,} trainings"]
-                if "Frontliners" in row:
+                if "Frontliners" in row and row["Frontliners"] > 0:
                     parts.append(f"👥 {int(row['Frontliners']):,} frontliners")
+                elif "Frontliners" in row:
+                    parts.append(f"👥 N/A frontliners")
                 if "Stores" in row:
                     parts.append(f"🏪 {int(row['Stores']):,} stores")
                 if "Pass Rate" in row and pd.notna(row["Pass Rate"]):
