@@ -1548,7 +1548,7 @@ if df is not None and len(df) > 0:
                         parts.append(f'<div style="margin-top:4px;border-top:1px solid rgba(0,186,199,0.15);padding-top:6px;"><span style="font-size:0.75rem;opacity:0.6;">TRAINERS</span>{trainer_lines}{suffix}</div>')
 
                 st.markdown(f"""
-                <div style="background:rgba(0,186,199,0.06); border:1px solid rgba(0,186,199,0.2); border-radius:10px; padding:14px; margin-bottom:10px;">
+                <div style="background:rgba(0,186,199,0.06); border:1px solid rgba(0,186,199,0.2); border-radius:10px; padding:14px; margin-bottom:10px; min-height:320px;">
                     {"<br>".join(parts)}
                 </div>
                 """, unsafe_allow_html=True)
