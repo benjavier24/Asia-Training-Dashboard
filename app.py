@@ -1522,7 +1522,15 @@ if df is not None and len(df) > 0:
 
                 # Show trainers for this account (leaderboard style)
                 if metrics.get("Trainer"):
-                    acct_trainer_counts = df[df["Account"] == acct_name]["Trainer"].dropna().value_counts()
+                    acct_df = df[df["Account"] == acct_name]
+                    # Count unique sessions per trainer (by Training ID or Date)
+                    if metrics.get("Training ID"):
+                        acct_trainer_counts = acct_df.groupby("Trainer")["Training ID"].nunique().sort_values(ascending=False)
+                    elif metrics.get("Date"):
+                        acct_trainer_counts = acct_df.groupby("Trainer")["Date"].nunique().sort_values(ascending=False)
+                    else:
+                        acct_trainer_counts = acct_df["Trainer"].dropna().value_counts()
+
                     if len(acct_trainer_counts) > 0:
                         top_trainers = acct_trainer_counts.head(5)
                         medals = ["🥇", "🥈", "🥉", "4.", "5."]
