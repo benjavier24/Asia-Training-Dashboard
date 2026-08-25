@@ -1506,8 +1506,7 @@ if df is not None and len(df) > 0:
 
     with kpi_col2:
         val = f"{kpis.get('Unique Learners', kpis.get('Total Participants', 0)):,}"
-        delta = f"of {kpis['Total Participants']:,} records" if "Unique Learners" in kpis else None
-        st.markdown(render_kpi_card("Frontliners Trained", val, delta), unsafe_allow_html=True)
+        st.markdown(render_kpi_card("Frontliners Trained", val, "unique individuals"), unsafe_allow_html=True)
 
     with kpi_col3:
         stores_val = f"{kpis.get('Stores', 0):,}" if "Stores" in kpis else "N/A"
@@ -1557,10 +1556,16 @@ if df is not None and len(df) > 0:
 
     with sec_col5:
         if metrics.get("Training Type") and len(df) > 0:
-            method_counts = df["Training Type"].value_counts()
-            top_method = method_counts.index[0] if len(method_counts) > 0 else "N/A"
+            # Count actual unique sessions per training type
+            if metrics.get("Training ID"):
+                method_sessions = df.groupby("Training Type")["Training ID"].nunique().sort_values(ascending=False)
+            elif metrics.get("Date"):
+                method_sessions = df.groupby("Training Type")["Date"].nunique().sort_values(ascending=False)
+            else:
+                method_sessions = df["Training Type"].value_counts()
+            top_method = method_sessions.index[0] if len(method_sessions) > 0 else "N/A"
             val = top_method
-            delta = f"{method_counts.iloc[0]:,} sessions"
+            delta = f"{method_sessions.iloc[0]:,} sessions"
             st.markdown(render_kpi_card("Top Method", val, delta), unsafe_allow_html=True)
         elif "Total Training Hours" in kpis:
             val = f"{kpis['Total Training Hours']:,.0f}"
