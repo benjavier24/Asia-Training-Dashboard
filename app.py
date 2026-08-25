@@ -1520,14 +1520,17 @@ if df is not None and len(df) > 0:
                     color = "#2ecc71" if lift > 0 else "#e74c3c"
                     parts.append(f'📈 <span style="color:{color};font-weight:600;">{sign}{lift:.1f}pp</span> attach lift')
 
-                # Show trainers for this account (sorted by most sessions)
+                # Show trainers for this account (leaderboard style)
                 if metrics.get("Trainer"):
                     acct_trainer_counts = df[df["Account"] == acct_name]["Trainer"].dropna().value_counts()
                     if len(acct_trainer_counts) > 0:
                         top_trainers = acct_trainer_counts.head(5)
-                        trainer_list = ", ".join(top_trainers.index)
-                        suffix = f" +{len(acct_trainer_counts) - 5} more" if len(acct_trainer_counts) > 5 else ""
-                        parts.append(f'👤 <span style="opacity:0.85;">{trainer_list}{suffix}</span>')
+                        medals = ["🥇", "🥈", "🥉", "4.", "5."]
+                        trainer_lines = ""
+                        for rank, (trainer, count) in enumerate(top_trainers.items()):
+                            trainer_lines += f'<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;"><span>{medals[rank]} {trainer}</span><span style="opacity:0.6;font-size:0.75rem;">{int(count)} sessions</span></div>'
+                        suffix = f'<div style="opacity:0.5;font-size:0.7rem;margin-top:2px;">+{len(acct_trainer_counts) - 5} more trainers</div>' if len(acct_trainer_counts) > 5 else ""
+                        parts.append(f'<div style="margin-top:4px;border-top:1px solid rgba(0,186,199,0.15);padding-top:6px;"><span style="font-size:0.75rem;opacity:0.6;">TRAINERS</span>{trainer_lines}{suffix}</div>')
 
                 st.markdown(f"""
                 <div style="background:rgba(0,186,199,0.06); border:1px solid rgba(0,186,199,0.2); border-radius:10px; padding:14px; margin-bottom:10px;">
