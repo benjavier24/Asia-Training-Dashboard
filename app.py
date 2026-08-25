@@ -1471,6 +1471,13 @@ if df is not None and len(df) > 0:
 
         acct_breakdown = df.groupby("Account").agg(**acct_breakdown_agg).reset_index()
 
+        # Fallback: if Frontliners is 0 for an account (no Trainee Code/Name data),
+        # use the row count as a proxy for participants
+        if "Frontliners" in acct_breakdown.columns:
+            for idx, row in acct_breakdown.iterrows():
+                if row["Frontliners"] == 0:
+                    acct_breakdown.at[idx, "Frontliners"] = int(row["Trainings"])
+
         # Format percentages
         if "Pass Rate" in acct_breakdown.columns:
             acct_breakdown["Pass Rate"] = (acct_breakdown["Pass Rate"] * 100).round(1)
