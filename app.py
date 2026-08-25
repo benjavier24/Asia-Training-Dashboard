@@ -2164,11 +2164,11 @@ with st.sidebar:
 if df is None or len(df) == 0:
     st.markdown("---")
     if is_running_on_cloud():
-        st.markdown("""
+        st.markdown(f"""
         ### 📎 Upload Your Training Data
 
         **To get started:**
-        1. Go to SharePoint → **SEA Training Site → Global Documents → Training Dashboard Masterfile**
+        1. Go to [SharePoint → SEA Training Site → Global Documents → Training Dashboard Masterfile]({SHAREPOINT_URL})
         2. Download `Asia Training Dashboard v1.xlsx`
         3. Upload it using the sidebar on the left
 
