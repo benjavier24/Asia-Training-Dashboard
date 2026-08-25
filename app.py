@@ -601,10 +601,19 @@ def compute_kpis(df, metrics):
 
     if metrics.get("Training ID"):
         kpis["Total Sessions"] = df["Training ID"].nunique()
-    elif metrics.get("Training Name") and metrics.get("Date"):
-        kpis["Total Sessions"] = df.groupby(["Training Name", "Date"]).ngroups
-    elif metrics.get("Date"):
-        kpis["Total Sessions"] = df["Date"].nunique()
+    else:
+        # Count unique sessions as unique combos of Date + Training Name + Trainer
+        session_cols = []
+        if metrics.get("Date"):
+            session_cols.append("Date")
+        if metrics.get("Training Name"):
+            session_cols.append("Training Name")
+        if metrics.get("Trainer"):
+            session_cols.append("Trainer")
+        if session_cols:
+            kpis["Total Sessions"] = df.groupby(session_cols).ngroups
+        elif metrics.get("Date"):
+            kpis["Total Sessions"] = df["Date"].nunique()
 
     if metrics.get("Training Hours"):
         kpis["Total Training Hours"] = df["Training Hours"].sum()
@@ -1559,10 +1568,22 @@ if df is not None and len(df) > 0:
             # Count actual unique sessions per training type
             if metrics.get("Training ID"):
                 method_sessions = df.groupby("Training Type")["Training ID"].nunique().sort_values(ascending=False)
-            elif metrics.get("Date"):
-                method_sessions = df.groupby("Training Type")["Date"].nunique().sort_values(ascending=False)
             else:
-                method_sessions = df["Training Type"].value_counts()
+                # Use combo of Date + Training Name + Trainer as session key
+                session_cols = ["Training Type"]
+                if metrics.get("Date"):
+                    session_cols.append("Date")
+                if metrics.get("Training Name"):
+                    session_cols.append("Training Name")
+                if metrics.get("Trainer"):
+                    session_cols.append("Trainer")
+                if len(session_cols) > 1:
+                    method_sessions = df.groupby(session_cols).ngroups  # total — need per-type
+                    method_sessions = df.groupby("Training Type").apply(
+                        lambda g: g.drop_duplicates(subset=session_cols[1:]).shape[0]
+                    ).sort_values(ascending=False)
+                else:
+                    method_sessions = df["Training Type"].value_counts()
             top_method = method_sessions.index[0] if len(method_sessions) > 0 else "N/A"
             val = top_method
             delta = f"{method_sessions.iloc[0]:,} sessions"
@@ -1607,12 +1628,26 @@ if df is not None and len(df) > 0:
 
         # Build per-account summary
         # Count actual unique sessions, not rows
+        # A unique session = unique combination of Date + Training Name + Trainer (or Training ID if available)
         if metrics.get("Training ID"):
             acct_breakdown_agg = {"Trainings": ("Training ID", "nunique")}
-        elif metrics.get("Date"):
-            acct_breakdown_agg = {"Trainings": ("Date", "nunique")}
         else:
-            acct_breakdown_agg = {"Trainings": ("Account", "count")}
+            # Create a synthetic session key from available fields
+            session_key_parts = []
+            if metrics.get("Date"):
+                session_key_parts.append(breakdown_df["Date"].astype(str))
+            if metrics.get("Training Name"):
+                session_key_parts.append(breakdown_df["Training Name"].astype(str))
+            if metrics.get("Trainer"):
+                session_key_parts.append(breakdown_df["Trainer"].astype(str))
+            if session_key_parts:
+                breakdown_df = breakdown_df.copy()
+                breakdown_df["_session_key"] = session_key_parts[0]
+                for part in session_key_parts[1:]:
+                    breakdown_df["_session_key"] = breakdown_df["_session_key"] + "|" + part
+                acct_breakdown_agg = {"Trainings": ("_session_key", "nunique")}
+            else:
+                acct_breakdown_agg = {"Trainings": ("Account", "count")}
 
         if metrics.get("Trainee Code"):
             acct_breakdown_agg["Frontliners"] = ("Trainee Code", "nunique")
