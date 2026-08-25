@@ -1434,6 +1434,95 @@ if df is not None and len(df) > 0:
             st.markdown(render_kpi_card("Total Records", val, "in filtered view"), unsafe_allow_html=True)
 
 
+    # ─── ACCOUNT BREAKDOWN (when a specific market is selected) ───
+    selected_market = None
+    try:
+        if metrics.get("Country") and sel_countries != "All":
+            selected_market = sel_countries
+    except NameError:
+        pass
+    if not selected_market and metrics.get("Country") and df["Country"].nunique() == 1:
+        selected_market = df["Country"].iloc[0]
+
+    if selected_market and metrics.get("Account") and len(df) > 0 and df["Account"].nunique() > 1:
+        st.markdown("---")
+        st.markdown(f'<div class="section-header">🏢 {selected_market} — Account Breakdown</div>', unsafe_allow_html=True)
+
+        # Build per-account summary
+        acct_breakdown_agg = {"Trainings": ("Account", "count")}
+        if metrics.get("Trainee Code"):
+            acct_breakdown_agg["Frontliners"] = ("Trainee Code", "nunique")
+        elif metrics.get("Trainee Name"):
+            acct_breakdown_agg["Frontliners"] = ("Trainee Name", "nunique")
+        if metrics.get("Store"):
+            acct_breakdown_agg["Stores"] = ("Store", "nunique")
+        if metrics.get("Pass Flag"):
+            acct_breakdown_agg["Pass Rate"] = ("Pass Flag", "mean")
+        if metrics.get("Assessment Score"):
+            acct_breakdown_agg["Avg Score"] = ("Assessment Score", "mean")
+        if metrics.get("Attach Rate Before"):
+            acct_breakdown_agg["AR Before"] = ("Attach Rate Before", "mean")
+        if metrics.get("Attach Rate After"):
+            acct_breakdown_agg["AR After"] = ("Attach Rate After", "mean")
+
+        acct_breakdown = df.groupby("Account").agg(**acct_breakdown_agg).reset_index()
+
+        # Format percentages
+        if "Pass Rate" in acct_breakdown.columns:
+            acct_breakdown["Pass Rate"] = (acct_breakdown["Pass Rate"] * 100).round(1)
+        if "Avg Score" in acct_breakdown.columns:
+            scores = acct_breakdown["Avg Score"]
+            acct_breakdown["Avg Score"] = (scores * 100 if scores.max() <= 1 else scores).round(1)
+        if "AR Before" in acct_breakdown.columns:
+            if acct_breakdown["AR Before"].max() <= 1:
+                acct_breakdown["AR Before"] = (acct_breakdown["AR Before"] * 100).round(1)
+        if "AR After" in acct_breakdown.columns:
+            if acct_breakdown["AR After"].max() <= 1:
+                acct_breakdown["AR After"] = (acct_breakdown["AR After"] * 100).round(1)
+        if "AR Before" in acct_breakdown.columns and "AR After" in acct_breakdown.columns:
+            acct_breakdown["AR Lift (pp)"] = (acct_breakdown["AR After"] - acct_breakdown["AR Before"]).round(1)
+
+        acct_breakdown = acct_breakdown.sort_values("Trainings", ascending=False)
+
+        # Display as KPI cards per account (top 6)
+        top_accounts = acct_breakdown.head(6)
+        acct_card_cols = st.columns(min(len(top_accounts), 3))
+
+        for i, (_, row) in enumerate(top_accounts.iterrows()):
+            with acct_card_cols[i % 3]:
+                acct_name = row["Account"]
+                trainings = int(row["Trainings"])
+                parts = [f"**{acct_name}**", f"📋 {trainings:,} trainings"]
+                if "Frontliners" in row:
+                    parts.append(f"👥 {int(row['Frontliners']):,} frontliners")
+                if "Stores" in row:
+                    parts.append(f"🏪 {int(row['Stores']):,} stores")
+                if "Pass Rate" in row and pd.notna(row["Pass Rate"]):
+                    rate = row["Pass Rate"]
+                    color = "#2ecc71" if rate >= 80 else "#e74c3c" if rate < 70 else "#FFB74D"
+                    parts.append(f'✅ <span style="color:{color};font-weight:600;">{rate:.1f}%</span> pass rate')
+                if "Avg Score" in row and pd.notna(row["Avg Score"]):
+                    parts.append(f"📝 {row['Avg Score']:.1f}% avg score")
+                if "AR Lift (pp)" in row and pd.notna(row["AR Lift (pp)"]):
+                    lift = row["AR Lift (pp)"]
+                    sign = "+" if lift > 0 else ""
+                    color = "#2ecc71" if lift > 0 else "#e74c3c"
+                    parts.append(f'📈 <span style="color:{color};font-weight:600;">{sign}{lift:.1f}pp</span> attach lift')
+
+                st.markdown(f"""
+                <div style="background:rgba(0,186,199,0.06); border:1px solid rgba(0,186,199,0.2); border-radius:10px; padding:14px; margin-bottom:10px;">
+                    {"<br>".join(parts)}
+                </div>
+                """, unsafe_allow_html=True)
+
+        # Full table below cards
+        col_config_acct = {}
+        if "Pass Rate" in acct_breakdown.columns:
+            col_config_acct["Pass Rate"] = st.column_config.ProgressColumn("Pass Rate %", min_value=0, max_value=100, format="%.1f%%")
+
+        st.dataframe(acct_breakdown, use_container_width=True, height=250, column_config=col_config_acct)
+
+
     # ─── TABBED CONTENT SECTIONS ───
     st.markdown("---")
 
