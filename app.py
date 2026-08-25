@@ -15,40 +15,51 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS - theme-aware design that works in both light and dark mode
+# Custom CSS - Modern light executive design
 st.markdown("""
 <style>
+    /* Force light theme feel */
+    .stApp {
+        background: linear-gradient(135deg, #f5f7fa 0%, #e8ecf1 100%);
+    }
+
     .main-header {
         font-size: 1.8rem;
         font-weight: 700;
-        color: #00BAC7;
+        color: #1a1a2e;
         margin-bottom: 0.2rem;
         font-family: 'Segoe UI', sans-serif;
     }
     .sub-header {
         font-size: 0.85rem;
-        opacity: 0.5;
+        color: #6b7280;
         margin-bottom: 1.5rem;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# Additional CSS for executive layout - theme-aware
+# Additional CSS for executive layout
 st.markdown("""
 <style>
-    /* KPI Cards - use CSS variables for theme awareness */
+    /* KPI Cards - floating white cards with shadow */
     .kpi-card {
-        background: var(--background-color, rgba(255,255,255,0.05));
-        border-radius: 12px;
-        padding: 20px 12px;
+        background: #ffffff;
+        border-radius: 16px;
+        padding: 22px 14px;
         text-align: center;
-        border: 1px solid rgba(0,186,199,0.3);
+        border: none;
         height: 140px;
         display: flex;
         flex-direction: column;
         justify-content: center;
         align-items: center;
         overflow: hidden;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .kpi-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(0,186,199,0.12);
     }
     .kpi-value {
         font-size: clamp(1.2rem, 4vw, 1.8rem);
@@ -61,63 +72,95 @@ st.markdown("""
         max-width: 100%;
     }
     .kpi-label {
-        font-size: 0.8rem;
+        font-size: 0.7rem;
         text-transform: uppercase;
-        letter-spacing: 0.5px;
-        opacity: 0.8;
+        letter-spacing: 0.8px;
         font-weight: 600;
-        color: inherit;
+        color: #6b7280;
     }
     .kpi-delta {
-        font-size: 0.75rem;
+        font-size: 0.72rem;
         margin-top: 4px;
-        opacity: 0.7;
-        color: inherit;
+        color: #9ca3af;
     }
-    .kpi-delta.positive { color: #2ecc71; font-weight: 600; opacity: 1; }
-    .kpi-delta.negative { color: #e74c3c; font-weight: 600; opacity: 1; }
+    .kpi-delta.positive { color: #10b981; font-weight: 600; }
+    .kpi-delta.negative { color: #ef4444; font-weight: 600; }
 
-    /* Insight boxes - theme-aware */
+    /* Hero banner for context */
+    .hero-banner {
+        background: linear-gradient(135deg, #00BAC7 0%, #170F4F 100%);
+        border-radius: 16px;
+        padding: 24px 28px;
+        margin-bottom: 1.2rem;
+        color: white;
+        box-shadow: 0 4px 20px rgba(0,186,199,0.2);
+    }
+    .hero-banner h3 {
+        margin: 0 0 4px;
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: white;
+    }
+    .hero-banner p {
+        margin: 0;
+        font-size: 0.8rem;
+        opacity: 0.8;
+    }
+
+    /* Insight boxes */
     .insight-box {
-        background: rgba(0,186,199,0.1);
-        border-radius: 8px;
-        padding: 12px 16px;
-        border-left: 3px solid #00BAC7;
+        background: #ffffff;
+        border-radius: 12px;
+        padding: 14px 18px;
+        border-left: 4px solid #00BAC7;
         margin: 6px 0;
-        color: inherit;
-        font-size: 0.9rem;
+        color: #374151;
+        font-size: 0.88rem;
+        box-shadow: 0 1px 6px rgba(0,0,0,0.04);
     }
     .warning-box {
-        background: rgba(243,156,18,0.1);
-        border-radius: 8px;
-        padding: 12px 16px;
-        border-left: 3px solid #f39c12;
+        background: #ffffff;
+        border-radius: 12px;
+        padding: 14px 18px;
+        border-left: 4px solid #f59e0b;
         margin: 6px 0;
-        color: inherit;
-        font-size: 0.9rem;
+        color: #374151;
+        font-size: 0.88rem;
+        box-shadow: 0 1px 6px rgba(0,0,0,0.04);
     }
-    .positive { color: #2ecc71; font-weight: 600; }
-    .negative { color: #e74c3c; font-weight: 600; }
+    .positive { color: #10b981; font-weight: 600; }
+    .negative { color: #ef4444; font-weight: 600; }
 
     /* Section headers */
     .section-header {
-        font-size: 1.1rem;
+        font-size: 1.05rem;
         font-weight: 700;
-        color: #00BAC7;
-        margin: 1.5rem 0 0.8rem;
-        padding-bottom: 6px;
-        border-bottom: 2px solid rgba(0,186,199,0.3);
+        color: #1a1a2e;
+        margin: 1.8rem 0 0.8rem;
+        padding-bottom: 8px;
+        border-bottom: 2px solid #e5e7eb;
     }
 
     /* Data availability */
-    .data-avail-present { color: #2ecc71; }
-    .data-avail-missing { color: #e74c3c; opacity: 0.7; }
+    .data-avail-present { color: #10b981; }
+    .data-avail-missing { color: #ef4444; opacity: 0.7; }
 
     /* Tab styling */
-    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 4px;
+        background: #ffffff;
+        border-radius: 12px;
+        padding: 4px;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+    }
     .stTabs [data-baseweb="tab"] {
-        padding: 8px 20px;
-        border-radius: 8px 8px 0 0;
+        padding: 10px 22px;
+        border-radius: 8px;
+        font-weight: 500;
+    }
+    .stTabs [data-baseweb="tab"][aria-selected="true"] {
+        background: #00BAC7 !important;
+        color: white !important;
     }
 
     /* Account cards in performance tab */
@@ -126,31 +169,64 @@ st.markdown("""
         align-items: center;
         gap: 12px;
         margin-bottom: 8px;
-        padding: 10px 14px;
-        border-radius: 8px;
-        background: rgba(0,186,199,0.08);
-        border: 1px solid rgba(0,186,199,0.15);
+        padding: 12px 16px;
+        border-radius: 12px;
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.03);
     }
     .account-card .name {
         font-weight: 600;
         font-size: 0.85rem;
-        color: inherit;
+        color: #1a1a2e;
     }
     .account-card .bar-bg {
-        background: rgba(128,128,128,0.2);
+        background: #e5e7eb;
         border-radius: 4px;
         height: 8px;
         width: 100%;
         margin-top: 4px;
     }
 
+    /* Sidebar styling */
+    [data-testid="stSidebar"] {
+        background: #ffffff !important;
+        border-right: 1px solid #e5e7eb;
+    }
+
+    /* Streamlit elements styling */
+    .stSelectbox label, .stDateInput label, .stSlider label {
+        color: #374151 !important;
+        font-weight: 500;
+    }
+
     /* Make multiselect tags more readable */
     span[data-baseweb="tag"] {
-        background-color: rgba(0,186,199,0.2) !important;
-        border-color: rgba(0,186,199,0.4) !important;
+        background-color: rgba(0,186,199,0.12) !important;
+        border-color: rgba(0,186,199,0.3) !important;
     }
     span[data-baseweb="tag"] span {
-        color: inherit !important;
+        color: #00838f !important;
+    }
+
+    /* Dataframe containers */
+    [data-testid="stDataFrame"] {
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 1px 6px rgba(0,0,0,0.04);
+    }
+
+    /* Metric cards */
+    [data-testid="stMetric"] {
+        background: #ffffff;
+        border-radius: 12px;
+        padding: 12px;
+        box-shadow: 0 1px 6px rgba(0,0,0,0.04);
+    }
+
+    /* Plotly chart containers */
+    .js-plotly-plot {
+        border-radius: 12px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -1351,21 +1427,29 @@ if df is not None and len(df) > 0:
     kpis = compute_kpis(df, metrics)
 
     # ─── CONTEXT BANNER: Show active training name(s) ───
-    st.markdown("---")
+    banner_title = ""
+    banner_sub = ""
     if metrics.get("Training Name"):
         unique_trainings = df["Training Name"].dropna().unique()
         if len(unique_trainings) == 1:
-            st.markdown(f'<div style="font-size:1rem; font-weight:600; color:#00BAC7; margin-bottom:4px;">📚 {unique_trainings[0]}</div>', unsafe_allow_html=True)
+            banner_title = f"📚 {unique_trainings[0]}"
         elif len(unique_trainings) <= 5:
-            names = " · ".join(unique_trainings)
-            st.markdown(f'<div style="font-size:0.9rem; font-weight:500; color:#00BAC7; margin-bottom:4px;">📚 {names}</div>', unsafe_allow_html=True)
+            banner_title = f"📚 {' · '.join(unique_trainings)}"
         else:
-            st.markdown(f'<div style="font-size:0.9rem; font-weight:500; color:#00BAC7; margin-bottom:4px;">📚 {len(unique_trainings)} training programs</div>', unsafe_allow_html=True)
+            banner_title = f"📚 {len(unique_trainings)} training programs"
 
     if metrics.get("Date") and len(df) > 0:
         date_min = df["Date"].min().strftime("%b %d, %Y")
         date_max = df["Date"].max().strftime("%b %d, %Y")
-        st.caption(f"📅 {date_min} → {date_max}")
+        banner_sub = f"📅 {date_min} → {date_max}"
+
+    if banner_title or banner_sub:
+        st.markdown(f"""
+        <div class="hero-banner">
+            <h3>{banner_title}</h3>
+            <p>{banner_sub}</p>
+        </div>
+        """, unsafe_allow_html=True)
 
     # ─── EXECUTIVE KPI SUMMARY (top of page, big numbers) ───
 
@@ -1568,7 +1652,7 @@ if df is not None and len(df) > 0:
                         parts.append(f'<div style="margin-top:4px;border-top:1px solid rgba(0,186,199,0.15);padding-top:6px;"><span style="font-size:0.75rem;opacity:0.6;">TRAINERS</span>{trainer_lines}{suffix}</div>')
 
                 st.markdown(f"""
-                <div style="background:rgba(0,186,199,0.06); border:1px solid rgba(0,186,199,0.2); border-radius:10px; padding:14px; margin-bottom:10px; min-height:320px;">
+                <div style="background:#ffffff; border:1px solid #e5e7eb; border-radius:14px; padding:18px; margin-bottom:12px; min-height:320px; box-shadow:0 2px 8px rgba(0,0,0,0.04);">
                     {"<br>".join(parts)}
                 </div>
                 """, unsafe_allow_html=True)
@@ -1703,7 +1787,7 @@ if df is not None and len(df) > 0:
                 with type_cols[i]:
                     color = type_colors.get(row["Type"], "#00BAC7")
                     st.markdown(f"""
-                    <div class="kpi-card" style="border-color: {color};">
+                    <div class="kpi-card" style="border-left: 4px solid {color};">
                         <div class="kpi-label">{row["Type"]}</div>
                         <div class="kpi-value" style="color: {color};">{row["Sessions"]:,}</div>
                         <div class="kpi-delta">{row["% of Total"]}% of trainings</div>
@@ -1735,7 +1819,7 @@ if df is not None and len(df) > 0:
                     fig = go.Figure()
                     fig.add_trace(go.Bar(
                         x=type_perf["Training Type"], y=type_perf["sessions"],
-                        name="Sessions", marker_color="#170F4F", opacity=0.6, yaxis="y"
+                        name="Sessions", marker_color="#a5b4fc", opacity=0.8, yaxis="y"
                     ))
                     fig.add_trace(go.Scatter(
                         x=type_perf["Training Type"], y=type_perf["Pass Rate (%)"],
@@ -1827,11 +1911,11 @@ if df is not None and len(df) > 0:
                         fig = go.Figure()
                         fig.add_trace(go.Bar(
                             name="Before Training", x=attach_grouped[group_col], y=attach_grouped["before"],
-                            marker_color="#170F4F", opacity=0.6
+                            marker_color="#a5b4fc", opacity=0.7
                         ))
                         fig.add_trace(go.Bar(
                             name="After Training (30d)", x=attach_grouped[group_col], y=attach_grouped["after"],
-                            marker_color="#00BAC7", opacity=0.85
+                            marker_color="#00BAC7", opacity=0.9
                         ))
                         fig.update_layout(
                             barmode="group", height=320, margin=dict(l=0, r=0, t=10, b=0),
@@ -1937,7 +2021,7 @@ if df is not None and len(df) > 0:
                 t_data = t_data.sort_values("Pass Rate (%)", ascending=False)
 
                 fig = px.bar(t_data, x="Trainer", y="Pass Rate (%)", color="sessions",
-                             color_continuous_scale=[[0, "#e6f9fa"], [0.5, "#00BAC7"], [1, "#170F4F"]])
+                             color_continuous_scale=[[0, "#e0f7fa"], [0.5, "#00BAC7"], [1, "#006064"]])
                 fig.update_layout(height=350, margin=dict(l=0, r=0, t=10, b=0),
                                   xaxis_title="", yaxis_title="Pass Rate (%)")
                 st.plotly_chart(fig, use_container_width=True)
@@ -1963,9 +2047,9 @@ if df is not None and len(df) > 0:
 
                     fig = go.Figure()
                     fig.add_trace(go.Bar(name="Before", x=attach_data["Account"], y=attach_data["before"],
-                                         marker_color="#170F4F", opacity=0.6))
+                                         marker_color="#a5b4fc", opacity=0.7))
                     fig.add_trace(go.Bar(name="After", x=attach_data["Account"], y=attach_data["after"],
-                                         marker_color="#00BAC7", opacity=0.85))
+                                         marker_color="#00BAC7", opacity=0.9))
                     fig.update_layout(barmode="group", height=320, margin=dict(l=0, r=0, t=10, b=0),
                                       yaxis_title="Attach Rate (%)",
                                       legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
