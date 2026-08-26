@@ -1,7 +1,10 @@
-"""Regression tests for session-deduplication logic.
+"""Regression tests for session-deduplication and metric semantics.
 
-These tests validate that Training Volume charts use the same
-session definition as the headline "Trainings Done" KPI.
+These tests validate that:
+- Training Volume charts use the same session definition as the headline KPI
+- Unique Learners Passed counts distinct people, not rows
+- Labels adapt based on data availability
+- Training Type uses session deduplication
 """
 import pandas as pd
 import numpy as np
@@ -19,6 +22,8 @@ def make_df(rows):
         df["Date"] = pd.to_datetime(df["Date"])
     if "Pass Flag" in df.columns:
         df["Pass Flag"] = pd.to_numeric(df["Pass Flag"], errors="coerce")
+    if "Assessment Score" in df.columns:
+        df["Assessment Score"] = pd.to_numeric(df["Assessment Score"], errors="coerce")
     return df
 
 
@@ -38,7 +43,7 @@ def test_a_repeated_trainee_rows():
 
     assert kpis["Total Sessions"] == 1, f"Expected 1 session, got {kpis['Total Sessions']}"
     assert weekly.sum() == 1, f"Expected 1 session in trend, got {weekly.sum()}"
-    print("✓ Test A passed: 20 trainee rows → 1 session")
+    print("PASS Test A: 20 trainee rows = 1 session")
 
 
 # === TEST B: Multiple Sessions Same Week ===
@@ -63,7 +68,7 @@ def test_b_multiple_sessions_same_week():
 
     assert kpis["Total Sessions"] == 3, f"Expected 3 sessions, got {kpis['Total Sessions']}"
     assert weekly.sum() == 3, f"Expected 3 sessions in trend, got {weekly.sum()}"
-    print("✓ Test B passed: 3 sessions × 5 trainees → 3 in trend")
+    print("PASS Test B: 3 sessions x 5 trainees = 3 in trend")
 
 
 # === TEST C: Training ID Available ===
@@ -84,7 +89,7 @@ def test_c_training_id():
 
     assert kpis["Total Sessions"] == 2, f"Expected 2 sessions (by Training ID), got {kpis['Total Sessions']}"
     assert len(sessions_df) == 2, f"Expected 2 rows in sessions_df, got {len(sessions_df)}"
-    print("✓ Test C passed: Training ID prioritized, 2 unique IDs → 2 sessions")
+    print("PASS Test C: Training ID prioritized, 2 unique IDs = 2 sessions")
 
 
 # === TEST D: Composite Fallback ===
@@ -105,47 +110,85 @@ def test_d_composite_fallback():
 
     assert kpis["Total Sessions"] == 2, f"Expected 2 sessions, got {kpis['Total Sessions']}"
     assert len(sessions_df) == 2, f"Expected 2 rows in sessions_df, got {len(sessions_df)}"
-    print("✓ Test D passed: Composite key (Date+Name+Trainer) → 2 sessions")
+    print("PASS Test D: Composite key (Date+Name+Trainer) = 2 sessions")
 
 
-# === TEST E: Market Split ===
-def test_e_market_split():
-    """Sessions across two markets should be counted correctly.
-    
-    Note: The headline KPI counts globally unique (Date, Training Name, Trainer) combos.
-    If the same trainer does the same training on the same date in two countries, 
-    the KPI counts it as 1 session. Per-market charts include Country in the dedup key
-    so they can show it separately per market.
-    """
+# === TEST E: Country-Aware Session Key ===
+def test_e_country_aware():
+    """Same Date+Name+Trainer in two countries = 2 sessions (Country-aware)."""
     rows = []
-    # 2 sessions in PH (different dates/trainings)
     for i in range(5):
         rows.append({"Date": "2026-03-01", "Training Name": "X", "Trainer": "A", "Country": "PH", "Trainee Code": f"P{i}", "Pass Flag": 1})
     for i in range(5):
-        rows.append({"Date": "2026-03-02", "Training Name": "Y", "Trainer": "B", "Country": "PH", "Trainee Code": f"Q{i}", "Pass Flag": 1})
-    # 1 session in MY (different training name to ensure it's unique globally)
-    for i in range(5):
-        rows.append({"Date": "2026-03-01", "Training Name": "Z", "Trainer": "C", "Country": "MY", "Trainee Code": f"M{i}", "Pass Flag": 1})
+        rows.append({"Date": "2026-03-01", "Training Name": "X", "Trainer": "A", "Country": "MY", "Trainee Code": f"M{i}", "Pass Flag": 1})
 
     df = make_df(rows)
     metrics = detect_metrics(df)
     kpis = compute_kpis(df, metrics)
 
-    # Overall: 3 globally unique sessions
     sessions_df = get_unique_sessions(df, metrics)
-    assert kpis["Total Sessions"] == 3, f"Expected 3 total sessions, got {kpis['Total Sessions']}"
-    assert len(sessions_df) == 3, f"Expected 3 session rows, got {len(sessions_df)}"
 
-    # Per-market dedup (same logic as the chart uses — includes Country)
-    session_cols = ["Country", "Date", "Training Name", "Trainer"]
-    df_mkt_sessions = df.drop_duplicates(subset=session_cols)
-    ph_sessions = df_mkt_sessions[df_mkt_sessions["Country"] == "PH"]
-    my_sessions = df_mkt_sessions[df_mkt_sessions["Country"] == "MY"]
+    # Country-aware: same session key in 2 countries = 2 distinct sessions
+    assert kpis["Total Sessions"] == 2, f"Expected 2 sessions (Country-aware), got {kpis['Total Sessions']}"
+    assert len(sessions_df) == 2, f"Expected 2 session rows, got {len(sessions_df)}"
+    print("PASS Test E: Country-aware key, PH + MY = 2 sessions")
 
-    assert len(ph_sessions) == 2, f"Expected 2 PH sessions, got {len(ph_sessions)}"
-    assert len(my_sessions) == 1, f"Expected 1 MY session, got {len(my_sessions)}"
-    assert len(ph_sessions) + len(my_sessions) == kpis["Total Sessions"]
-    print("✓ Test E passed: 2 PH + 1 MY = 3 total, reconciles with headline")
+
+# === TEST F: Unique Learners Passed ===
+def test_f_unique_learners_passed():
+    """One learner with 3 passing records should count as 1 unique learner passed."""
+    rows = [
+        {"Date": "2026-03-01", "Training Name": "X", "Trainer": "A", "Trainee Code": "EMP001", "Pass Flag": 1},
+        {"Date": "2026-03-02", "Training Name": "Y", "Trainer": "A", "Trainee Code": "EMP001", "Pass Flag": 1},
+        {"Date": "2026-03-03", "Training Name": "Z", "Trainer": "A", "Trainee Code": "EMP001", "Pass Flag": 1},
+        {"Date": "2026-03-01", "Training Name": "X", "Trainer": "A", "Trainee Code": "EMP002", "Pass Flag": 0},
+    ]
+    df = make_df(rows)
+    metrics = detect_metrics(df)
+    kpis = compute_kpis(df, metrics)
+
+    assert kpis["Unique Learners Passed"] == 1, f"Expected 1 unique learner passed, got {kpis['Unique Learners Passed']}"
+    assert kpis["Total Passed"] == 3, f"Expected 3 total passed rows, got {kpis['Total Passed']}"
+    print("PASS Test F: 1 learner x 3 passes = 1 unique learner passed")
+
+
+# === TEST G: No Trainee ID Fallback ===
+def test_g_no_trainee_fallback():
+    """Without Trainee Code/Name, _has_unique_learner should be False."""
+    rows = [
+        {"Date": "2026-03-01", "Training Name": "X", "Trainer": "A", "Pass Flag": 1},
+        {"Date": "2026-03-02", "Training Name": "Y", "Trainer": "A", "Pass Flag": 1},
+    ]
+    df = make_df(rows)
+    metrics = detect_metrics(df)
+    kpis = compute_kpis(df, metrics)
+
+    assert kpis["_has_unique_learner"] == False, "Expected no unique learner identification"
+    assert "Unique Learners Passed" not in kpis, "Should not have Unique Learners Passed without trainee data"
+    assert kpis["Total Participants"] == 2, f"Expected 2 total participants (rows), got {kpis['Total Participants']}"
+    print("PASS Test G: No trainee data = _has_unique_learner False, no unique passed count")
+
+
+# === TEST H: Training Type Sessions ===
+def test_h_training_type_sessions():
+    """Training Type breakdown should count unique sessions, not rows."""
+    rows = []
+    # 1 Virtual session with 50 attendees
+    for i in range(50):
+        rows.append({"Date": "2026-03-01", "Training Name": "X", "Trainer": "A", "Training Type": "Virtual/Online", "Trainee Code": f"E{i}", "Pass Flag": 1})
+    # 1 Face to Face session with 10 attendees
+    for i in range(10):
+        rows.append({"Date": "2026-03-02", "Training Name": "Y", "Trainer": "B", "Training Type": "Face to Face", "Trainee Code": f"F{i}", "Pass Flag": 1})
+
+    df = make_df(rows)
+    metrics = detect_metrics(df)
+
+    df_sessions = get_unique_sessions(df, metrics)
+    type_counts = df_sessions["Training Type"].value_counts()
+
+    assert type_counts.get("Virtual/Online", 0) == 1, f"Expected 1 Virtual session, got {type_counts.get('Virtual/Online', 0)}"
+    assert type_counts.get("Face to Face", 0) == 1, f"Expected 1 F2F session, got {type_counts.get('Face to Face', 0)}"
+    print("PASS Test H: Training Type counts unique sessions (1 Virtual, 1 F2F)")
 
 
 if __name__ == "__main__":
@@ -153,5 +196,8 @@ if __name__ == "__main__":
     test_b_multiple_sessions_same_week()
     test_c_training_id()
     test_d_composite_fallback()
-    test_e_market_split()
-    print("\n✓ All regression tests passed!")
+    test_e_country_aware()
+    test_f_unique_learners_passed()
+    test_g_no_trainee_fallback()
+    test_h_training_type_sessions()
+    print("\nAll regression tests passed!")

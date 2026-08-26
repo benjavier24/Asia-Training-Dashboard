@@ -832,16 +832,19 @@ def get_unique_sessions(df, metrics):
 
     Session identification priority:
       1. If Training ID exists → deduplicate by Training ID
-      2. Otherwise → deduplicate by the composite key (Date, Training Name, Trainer)
+      2. Otherwise → deduplicate by the composite key (Country, Date, Training Name, Trainer)
          using whichever of those fields are available.
+         Country is included when present to avoid collapsing sessions across markets.
 
     This matches the same logic used by compute_kpis["Total Sessions"].
     """
     if metrics.get("Training ID"):
         return df.drop_duplicates(subset=["Training ID"])
 
-    # Build composite session key from available fields
+    # Build composite session key from available fields (Country-aware)
     session_cols = []
+    if metrics.get("Country"):
+        session_cols.append("Country")
     if metrics.get("Date"):
         session_cols.append("Date")
     if metrics.get("Training Name"):
@@ -863,8 +866,10 @@ def compute_kpis(df, metrics):
     if metrics.get("Training ID"):
         kpis["Total Sessions"] = df["Training ID"].nunique()
     else:
-        # Count unique sessions as unique combos of Date + Training Name + Trainer
+        # Count unique sessions as unique combos of Country + Date + Training Name + Trainer
         session_cols = []
+        if metrics.get("Country"):
+            session_cols.append("Country")
         if metrics.get("Date"):
             session_cols.append("Date")
         if metrics.get("Training Name"):
@@ -914,6 +919,16 @@ def compute_kpis(df, metrics):
         attended = pd.to_numeric(df["Total Attended"], errors="coerce").sum()
         if invited > 0:
             kpis["Attendance Rate"] = round(attended / invited * 100, 1)
+
+    # Unique Learners Passed: count distinct people with at least one passing record
+    if "Total Passed" in kpis and (metrics.get("Trainee Code") or metrics.get("Trainee Name")):
+        trainee_col = "Trainee Code" if metrics.get("Trainee Code") else "Trainee Name"
+        passed_df = df[pd.to_numeric(df["Pass Flag"], errors="coerce") == 1] if metrics.get("Pass Flag") else pd.DataFrame()
+        if len(passed_df) > 0:
+            kpis["Unique Learners Passed"] = passed_df[trainee_col].nunique()
+
+    # Flag whether unique learner identification is available
+    kpis["_has_unique_learner"] = bool(metrics.get("Trainee Code") or metrics.get("Trainee Name"))
 
     if metrics.get("Attach Rate Before"):
         vals = pd.to_numeric(df["Attach Rate Before"], errors="coerce").dropna()
@@ -1022,12 +1037,14 @@ def generate_executive_insights(df, metrics, kpis, view_level="regional", active
 
     # --- VOLUME INSIGHTS ---
     if view_level == "regional" and metrics.get("Country") and df["Country"].nunique() > 1:
-        mkt_vol = df["Country"].value_counts()
-        if len(mkt_vol) > 1:
-            top_vol_mkt = mkt_vol.index[0]
-            share = round(mkt_vol.iloc[0] / mkt_vol.sum() * 100, 1)
-            insights.append(("neutral", f"{top_vol_mkt} accounts for {share}% of total training records",
-                             f"{mkt_vol.iloc[0]:,} of {mkt_vol.sum():,} records."))
+        # Use unique sessions per market for volume insight
+        df_sessions_insight = get_unique_sessions(df, metrics)
+        mkt_sessions = df_sessions_insight["Country"].value_counts()
+        if len(mkt_sessions) > 1:
+            top_vol_mkt = mkt_sessions.index[0]
+            share = round(mkt_sessions.iloc[0] / mkt_sessions.sum() * 100, 1)
+            insights.append(("neutral", f"{top_vol_mkt} accounts for {share}% of regional training sessions",
+                             f"{mkt_sessions.iloc[0]:,} of {mkt_sessions.sum():,} sessions."))
 
     # --- ATTACH RATE INSIGHTS ---
     if "Attach Improvement" in kpis:
@@ -1978,12 +1995,16 @@ if df is not None and len(df) > 0:
         st.markdown(render_kpi_card("Trainings Done", val, "total sessions conducted"), unsafe_allow_html=True)
 
     with kpi_col2:
-        val = f"{kpis.get('Unique Learners', kpis.get('Total Participants', 0)):,}"
-        st.markdown(render_kpi_card("Frontliners Trained", val, "unique individuals"), unsafe_allow_html=True)
+        if kpis.get("_has_unique_learner"):
+            val = f"{kpis.get('Unique Learners', 0):,}"
+            st.markdown(render_kpi_card("Unique Learners", val, "distinct individuals"), unsafe_allow_html=True)
+        else:
+            val = f"{kpis.get('Total Participants', 0):,}"
+            st.markdown(render_kpi_card("Learner Attendances", val, "total attendance records"), unsafe_allow_html=True)
 
     with kpi_col3:
         stores_val = f"{kpis.get('Stores', 0):,}" if "Stores" in kpis else "N/A"
-        st.markdown(render_kpi_card("Stores Trained", stores_val), unsafe_allow_html=True)
+        st.markdown(render_kpi_card("Stores Reached", stores_val), unsafe_allow_html=True)
 
     with kpi_col4:
         val = f"{kpis.get('Pass Rate', 'N/A')}%" if "Pass Rate" in kpis else "N/A"
@@ -2002,19 +2023,21 @@ if df is not None and len(df) > 0:
                     elif rate <= mkt_rates.min():
                         delta = "lowest in region"
                         delta_type = "negative"
-                    else:
-                        delta = f"{kpis.get('Total Passed', 0):,} passed"
-                else:
-                    delta = f"{kpis.get('Total Passed', 0):,} passed"
-            else:
-                delta = f"{kpis.get('Total Passed', 0):,} passed" if "Total Passed" in kpis else None
+                    elif "Unique Learners Passed" in kpis:
+                        delta = f"{kpis['Unique Learners Passed']:,} unique learners passed"
+                    # else: no delta shown
+                elif "Unique Learners Passed" in kpis:
+                    delta = f"{kpis['Unique Learners Passed']:,} unique learners passed"
+            elif "Unique Learners Passed" in kpis:
+                delta = f"{kpis['Unique Learners Passed']:,} unique learners passed"
+            # If no unique learner data, don't show a misleading count
         st.markdown(render_kpi_card("Passing Rate", val, delta, delta_type), unsafe_allow_html=True)
 
     with kpi_col5:
         val = f"{kpis.get('Avg Assessment Score', 'N/A')}%" if "Avg Assessment Score" in kpis else "N/A"
         delta_type = "positive" if kpis.get("Avg Assessment Score", 0) >= 75 else "negative" if kpis.get("Avg Assessment Score", 0) < 60 else "neutral"
         delta = "avg assessment score"
-        st.markdown(render_kpi_card("Product Knowledge", val, delta, delta_type), unsafe_allow_html=True)
+        st.markdown(render_kpi_card("Avg Assessment Score", val, delta, delta_type), unsafe_allow_html=True)
 
     # Row 2: Secondary metrics (smaller cards)
     sec_col1, sec_col2, sec_col3, sec_col4, sec_col5 = st.columns(5)
@@ -2200,11 +2223,11 @@ if df is not None and len(df) > 0:
 
                 parts = [f"<strong style='font-size:0.95rem;'>{acct_name}</strong>{rank_badge}", f"📋 {trainings:,} trainings"]
                 if "Frontliners" in row and row["Frontliners"] > 0:
-                    parts.append(f"👥 {int(row['Frontliners']):,} frontliners")
+                    parts.append(f"👥 {int(row['Frontliners']):,} unique learners")
                 else:
-                    # No unique trainee data — count rows as participants trained
+                    # No unique trainee data — count rows as learner attendances
                     acct_participants = len(breakdown_df[breakdown_df["Account"] == acct_name])
-                    parts.append(f"👥 {acct_participants:,} participants")
+                    parts.append(f"👥 {acct_participants:,} learner attendances")
                 if "Stores" in row:
                     parts.append(f"🏪 {int(row['Stores']):,} stores")
                 if "Pass Rate" in row and pd.notna(row["Pass Rate"]):
@@ -2298,17 +2321,19 @@ if df is not None and len(df) > 0:
         # Training Method Comparison
         if metrics.get("Training Type") and metrics.get("Pass Flag") and df["Training Type"].nunique() > 1:
             st.markdown('<div class="section-header">Training Method Comparison</div>', unsafe_allow_html=True)
-            method_comp = df.groupby("Training Type").agg(
-                sessions=("Training Type", "count"),
-                pass_rate=("Pass Flag", "mean")
-            ).reset_index()
+            # Count unique sessions per method; pass rate from all rows
+            df_method_sessions = get_unique_sessions(df, metrics)
+            method_session_counts = df_method_sessions.groupby("Training Type").size().reset_index(name="sessions")
+            method_pass_rates = df.groupby("Training Type")["Pass Flag"].mean().reset_index()
+            method_pass_rates.columns = ["Training Type", "pass_rate"]
+            method_comp = method_session_counts.merge(method_pass_rates, on="Training Type")
             method_comp["pass_rate"] = (method_comp["pass_rate"] * 100).round(1)
             method_comp = method_comp.sort_values("pass_rate", ascending=False)
             for _, row in method_comp.iterrows():
                 st.markdown(f"""
                 <div class="method-row">
                     <span class="method-name">{row["Training Type"]}</span>
-                    <span class="method-stat">{row["sessions"]:,} records</span>
+                    <span class="method-stat">{row["sessions"]:,} sessions</span>
                     <span class="method-rate">{row["pass_rate"]}%</span>
                 </div>
                 """, unsafe_allow_html=True)
@@ -2410,7 +2435,9 @@ if df is not None and len(df) > 0:
         if metrics.get("Training Type") and len(df) > 0:
             st.markdown('<div class="section-header">Training Type Breakdown</div>', unsafe_allow_html=True)
 
-            type_data = df["Training Type"].value_counts().reset_index()
+            # Count unique sessions per training type using the reusable session helper
+            df_type_sessions = get_unique_sessions(df, metrics)
+            type_data = df_type_sessions["Training Type"].value_counts().reset_index()
             type_data.columns = ["Type", "Sessions"]
             type_data["% of Total"] = (type_data["Sessions"] / type_data["Sessions"].sum() * 100).round(1)
 
@@ -2449,10 +2476,11 @@ if df is not None and len(df) > 0:
             with type_chart_col2:
                 # Training Type with pass rate if available
                 if metrics.get("Pass Flag"):
-                    type_perf = df.groupby("Training Type").agg(
-                        sessions=("Training Type", "count"),
-                        pass_rate=("Pass Flag", "mean")
-                    ).reset_index()
+                    # Count unique sessions per type for the bar, pass rate from all rows
+                    type_perf_sessions = df_type_sessions.groupby("Training Type").size().reset_index(name="sessions")
+                    type_perf_pass = df.groupby("Training Type")["Pass Flag"].mean().reset_index()
+                    type_perf_pass.columns = ["Training Type", "pass_rate"]
+                    type_perf = type_perf_sessions.merge(type_perf_pass, on="Training Type")
                     type_perf["Pass Rate (%)"] = (type_perf["pass_rate"] * 100).round(1)
                     type_perf = type_perf.sort_values("sessions", ascending=False)
 
