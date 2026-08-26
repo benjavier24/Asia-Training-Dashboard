@@ -354,6 +354,104 @@ st.markdown("""
         margin: 0 4px;
         opacity: 0.5;
     }
+
+    /* ═══ INSIGHT STATUS CARDS ═══ */
+    .insight-card {
+        background: #FFFFFF;
+        border-radius: 10px;
+        padding: 12px 14px;
+        margin: 5px 0;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+        border-left: 3px solid #D1D5DB;
+        font-size: 0.82rem;
+        line-height: 1.5;
+        color: #374151 !important;
+    }
+    .insight-card.positive { border-left-color: #10B981; }
+    .insight-card.attention { border-left-color: #F59E0B; }
+    .insight-card.critical { border-left-color: #EF4444; }
+    .insight-card.watch { border-left-color: #6366F1; }
+    .insight-card.neutral { border-left-color: #9CA3AF; }
+    .insight-status {
+        font-size: 0.6rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+        margin-bottom: 3px;
+    }
+    .insight-status.positive { color: #10B981 !important; }
+    .insight-status.attention { color: #F59E0B !important; }
+    .insight-status.critical { color: #EF4444 !important; }
+    .insight-status.watch { color: #6366F1 !important; }
+    .insight-status.neutral { color: #9CA3AF !important; }
+    .insight-headline {
+        font-weight: 600;
+        font-size: 0.84rem;
+        color: #111827 !important;
+        margin-bottom: 2px;
+    }
+    .insight-detail {
+        font-size: 0.75rem;
+        color: #6B7280 !important;
+    }
+    /* Needs Attention list */
+    .attention-list {
+        background: #FFFFFF;
+        border-radius: 10px;
+        padding: 14px 16px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+        border: 1px solid #FEF3C7;
+    }
+    .attention-item {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        padding: 6px 0;
+        border-bottom: 1px solid #F3F4F6;
+        font-size: 0.8rem;
+    }
+    .attention-item:last-child { border-bottom: none; }
+    .attention-rank {
+        font-weight: 700;
+        color: #F59E0B !important;
+        font-size: 0.72rem;
+        min-width: 18px;
+    }
+    .attention-text { color: #374151 !important; }
+    .attention-metric {
+        margin-left: auto;
+        font-weight: 600;
+        color: #EF4444 !important;
+        font-size: 0.75rem;
+        white-space: nowrap;
+    }
+    /* Method comparison */
+    .method-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 8px 12px;
+        background: #FFFFFF;
+        border-radius: 8px;
+        margin: 4px 0;
+        border: 1px solid #F3F4F6;
+    }
+    .method-name {
+        font-weight: 600;
+        font-size: 0.8rem;
+        color: #111827 !important;
+        min-width: 100px;
+    }
+    .method-stat {
+        font-size: 0.72rem;
+        color: #6B7280 !important;
+    }
+    .method-rate {
+        margin-left: auto;
+        font-weight: 700;
+        font-size: 0.9rem;
+        color: #0891B2 !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -777,56 +875,175 @@ def compute_kpis(df, metrics):
     return kpis
 
 
-def generate_ai_insights(df, metrics, kpis):
-    """Generate adaptive AI insights based on available data."""
+def render_insight_card(status, headline, detail=None):
+    """Render a structured insight card with status, headline, and optional detail."""
+    detail_html = f'<div class="insight-detail">{detail}</div>' if detail else ""
+    return f"""
+    <div class="insight-card {status}">
+        <div class="insight-status {status}">{status}</div>
+        <div class="insight-headline">{headline}</div>
+        {detail_html}
+    </div>
+    """
+
+
+def generate_executive_insights(df, metrics, kpis, view_level="regional", active_market=None):
+    """Generate scoped, deterministic insights based on current filter context.
+
+    view_level: 'regional' (all markets), 'market' (single market), or 'account' (single account)
+    Returns list of (status, headline, detail) tuples.
+    """
     insights = []
 
+    # --- PASS RATE INSIGHTS ---
     if "Pass Rate" in kpis:
         rate = kpis["Pass Rate"]
-        if rate >= 85:
-            insights.append(("", f"Pass rate is {rate}%, indicating strong assessment performance across the current selection."))
-        elif rate >= 70:
-            insights.append(("", f"Pass rate at {rate}% — consider reviewing assessment difficulty or adding pre-training materials."))
+        if view_level == "regional" and metrics.get("Country") and df["Country"].nunique() > 1:
+            # Regional: compare markets
+            mkt_rates = df.groupby("Country")["Pass Flag"].mean().sort_values(ascending=False) * 100
+            if len(mkt_rates) > 1:
+                top_mkt, top_rate = mkt_rates.index[0], mkt_rates.iloc[0]
+                bot_mkt, bot_rate = mkt_rates.index[-1], mkt_rates.iloc[-1]
+                gap = round(top_rate - bot_rate, 1)
+                insights.append(("positive", f"{top_mkt} has the highest pass rate at {top_rate:.1f}%",
+                                 f"{gap} pts above {bot_mkt} ({bot_rate:.1f}%)."))
+                if bot_rate < 70:
+                    insights.append(("attention", f"{bot_mkt} has the lowest pass rate at {bot_rate:.1f}%",
+                                     f"{round(rate - bot_rate, 1)} pts below the regional average of {rate}%."))
+        elif view_level == "market" and metrics.get("Account") and df["Account"].nunique() > 1:
+            # Market: compare accounts
+            acct_rates = df.groupby("Account")["Pass Flag"].mean().sort_values(ascending=False) * 100
+            if len(acct_rates) > 1:
+                top_acct, top_rate_a = acct_rates.index[0], acct_rates.iloc[0]
+                bot_acct, bot_rate_a = acct_rates.index[-1], acct_rates.iloc[-1]
+                mkt_name = active_market or "this market"
+                insights.append(("positive", f"{top_acct} has the highest pass rate at {top_rate_a:.1f}%",
+                                 f"In {mkt_name}."))
+                if bot_rate_a < rate:
+                    diff = round(rate - bot_rate_a, 1)
+                    insights.append(("attention", f"{bot_acct} has the lowest pass rate at {bot_rate_a:.1f}%",
+                                     f"{diff} pts below the {mkt_name} average of {rate}%."))
         else:
-            insights.append(("", f"Pass rate of {rate}% is below target — content or delivery may need adjustment."))
+            # Single scope: just report the rate
+            if rate >= 85:
+                insights.append(("positive", f"Pass rate is {rate}%", "Strong assessment performance across the current selection."))
+            elif rate >= 70:
+                insights.append(("watch", f"Pass rate at {rate}%", "Below 85% — consider reviewing assessment content."))
+            else:
+                insights.append(("critical", f"Pass rate is {rate}%", "Below target threshold. Content or delivery may need adjustment."))
 
+    # --- ASSESSMENT SCORE INSIGHTS ---
     if "Avg Assessment Score" in kpis:
         score = kpis["Avg Assessment Score"]
-        if score >= 80:
-            insights.append(("", f"Average assessment score of {score}% across all learners."))
-        elif score >= 60:
-            insights.append(("", f"Average score is {score}% — consider additional practice exercises."))
-        else:
-            insights.append(("", f"Average score of {score}% suggests comprehension gaps."))
+        if view_level == "regional" and metrics.get("Country") and df["Country"].nunique() > 1:
+            mkt_scores = df.groupby("Country")["Assessment Score"].mean().sort_values(ascending=False)
+            if mkt_scores.max() <= 1:
+                mkt_scores = mkt_scores * 100
+            if len(mkt_scores) > 1:
+                top_s = mkt_scores.index[0]
+                insights.append(("neutral", f"Highest avg score: {top_s} at {mkt_scores.iloc[0]:.1f}%",
+                                 f"Regional average is {score}%."))
+        elif view_level == "market" and metrics.get("Account") and df["Account"].nunique() > 1:
+            acct_scores = df.groupby("Account")["Assessment Score"].mean().sort_values(ascending=False)
+            if acct_scores.max() <= 1:
+                acct_scores = acct_scores * 100
+            if len(acct_scores) > 1:
+                bot_s_acct = acct_scores.index[-1]
+                bot_s_val = acct_scores.iloc[-1]
+                diff = round(score - bot_s_val, 1)
+                if diff > 5:
+                    insights.append(("attention", f"{bot_s_acct} has the lowest avg score at {bot_s_val:.1f}%",
+                                     f"{diff} pts below the market average."))
 
+    # --- VOLUME INSIGHTS ---
+    if view_level == "regional" and metrics.get("Country") and df["Country"].nunique() > 1:
+        mkt_vol = df["Country"].value_counts()
+        if len(mkt_vol) > 1:
+            top_vol_mkt = mkt_vol.index[0]
+            share = round(mkt_vol.iloc[0] / mkt_vol.sum() * 100, 1)
+            insights.append(("neutral", f"{top_vol_mkt} accounts for {share}% of total training records",
+                             f"{mkt_vol.iloc[0]:,} of {mkt_vol.sum():,} records."))
+
+    # --- ATTACH RATE INSIGHTS ---
     if "Attach Improvement" in kpis:
         imp = kpis["Attach Improvement"]
         if imp > 0:
-            insights.append(("", f"Attach rate improved by +{imp}pp post-training (30-day window)."))
-        else:
-            insights.append(("", f"Attach rate declined by {abs(imp)}pp post-training. Investigate contributing factors."))
+            insights.append(("positive", f"Attach rate improved by +{imp}pp post-training",
+                             "Measured 30 days after training delivery."))
+        elif imp < 0:
+            insights.append(("critical", f"Attach rate declined by {abs(imp)}pp post-training",
+                             "Investigate contributing factors in the affected accounts."))
 
-    if metrics.get("Account") and metrics.get("Pass Flag"):
-        # NOTE: This ranking includes ALL accounts in the current filtered view,
-        # including internal accounts (e.g., "Bolttech Internal") if present in the data.
-        # To exclude internal accounts, add a filter in the sidebar or mark them in the source data.
-        acct_pass = df.groupby("Account")["Pass Flag"].mean().sort_values(ascending=False)
-        if len(acct_pass) > 1:
-            top = acct_pass.index[0]
-            top_rate = acct_pass.iloc[0] * 100
-            insights.append(("", f"{top} is top-performing with {top_rate:.0f}% pass rate."))
-            bottom = acct_pass.index[-1]
-            bottom_rate = acct_pass.iloc[-1] * 100
-            if bottom_rate < 70:
-                insights.append(("", f"{bottom} needs attention — only {bottom_rate:.0f}% pass rate."))
-
-    if "Total Sessions" in kpis and "Unique Learners" in kpis:
-        insights.append(("", f"{kpis['Total Sessions']:,} sessions trained {kpis['Unique Learners']:,} unique learners."))
-
-    if "Stores" in kpis:
-        insights.append(("", f"Training reached {kpis['Stores']:,} stores across {kpis.get('Countries', '?')} markets."))
+    # --- TRAINING METHOD INSIGHTS ---
+    if metrics.get("Training Type") and df["Training Type"].nunique() > 1 and metrics.get("Pass Flag"):
+        method_perf = df.groupby("Training Type").agg(
+            sessions=("Training Type", "count"),
+            pass_rate=("Pass Flag", "mean")
+        ).reset_index()
+        method_perf["pass_rate"] = (method_perf["pass_rate"] * 100).round(1)
+        method_perf = method_perf.sort_values("pass_rate", ascending=False)
+        if len(method_perf) >= 2:
+            top_m = method_perf.iloc[0]
+            bot_m = method_perf.iloc[-1]
+            diff = round(top_m["pass_rate"] - bot_m["pass_rate"], 1)
+            if diff > 2:
+                insights.append(("neutral",
+                    f"{top_m['Training Type']} recorded a {diff} pt higher pass rate than {bot_m['Training Type']}",
+                    f"{top_m['pass_rate']}% vs {bot_m['pass_rate']}%."))
 
     return insights
+
+
+def generate_needs_attention(df, metrics, kpis, view_level="regional"):
+    """Generate a prioritized 'Needs Attention' list. Returns list of (entity, reason, metric_str)."""
+    items = []
+
+    if view_level == "regional" and metrics.get("Country") and metrics.get("Pass Flag"):
+        mkt_rates = df.groupby("Country")["Pass Flag"].mean().sort_values() * 100
+        avg = kpis.get("Pass Rate", 0)
+        for mkt, rate in mkt_rates.items():
+            if rate < avg and rate < 75:
+                items.append((mkt, "below-avg pass rate", f"{rate:.1f}%"))
+                if len(items) >= 5:
+                    break
+
+    elif view_level == "market" and metrics.get("Account") and metrics.get("Pass Flag"):
+        acct_rates = df.groupby("Account")["Pass Flag"].mean().sort_values() * 100
+        avg = kpis.get("Pass Rate", 0)
+        for acct, rate in acct_rates.items():
+            if rate < avg:
+                items.append((acct, "below-avg pass rate", f"{rate:.1f}%"))
+                if len(items) >= 5:
+                    break
+
+    # Add low-score programs
+    if metrics.get("Training Name") and metrics.get("Assessment Score") and df["Training Name"].nunique() > 1:
+        prog_scores = df.groupby("Training Name")["Assessment Score"].mean().sort_values()
+        if prog_scores.max() <= 1:
+            prog_scores = prog_scores * 100
+        overall_avg = kpis.get("Avg Assessment Score", 0)
+        for prog, score in prog_scores.items():
+            if score < overall_avg - 10 and len(items) < 5:
+                items.append((prog, "low avg score", f"{score:.1f}%"))
+
+    return items
+
+
+def generate_ai_insights(df, metrics, kpis):
+    """Legacy wrapper — calls generate_executive_insights for backward compatibility."""
+    # Determine view level from data
+    n_countries = df["Country"].nunique() if "Country" in df.columns else 0
+    if n_countries > 1:
+        view_level = "regional"
+    elif n_countries == 1:
+        view_level = "market"
+    else:
+        view_level = "account"
+    active_market = df["Country"].iloc[0] if n_countries == 1 and len(df) > 0 else None
+
+    exec_insights = generate_executive_insights(df, metrics, kpis, view_level, active_market)
+    # Convert to legacy format for any remaining consumers
+    return [(status, headline + (f" {detail}" if detail else "")) for status, headline, detail in exec_insights]
 
 
 def process_natural_query(question, df, metrics, kpis):
@@ -1685,6 +1902,9 @@ if df is not None and len(df) > 0:
 
     # ─── EXECUTIVE KPI SUMMARY (top of page, big numbers) ───
 
+    # Compute view context for KPI relative comparisons
+    _n_countries = df["Country"].nunique() if "Country" in df.columns else 0
+
     # Row 1: The 5 things executives care about most
     kpi_col1, kpi_col2, kpi_col3, kpi_col4, kpi_col5 = st.columns(5)
 
@@ -1703,13 +1923,33 @@ if df is not None and len(df) > 0:
     with kpi_col4:
         val = f"{kpis.get('Pass Rate', 'N/A')}%" if "Pass Rate" in kpis else "N/A"
         delta_type = "positive" if kpis.get("Pass Rate", 0) >= 80 else "negative" if kpis.get("Pass Rate", 0) < 70 else "neutral"
-        delta = f"{kpis.get('Total Passed', 0):,} passed" if "Total Passed" in kpis else None
+        # Relative context: vs scope average or ranking
+        delta = None
+        if "Pass Rate" in kpis:
+            rate = kpis["Pass Rate"]
+            if _n_countries > 1 and metrics.get("Country") and metrics.get("Pass Flag"):
+                # Regional view — show if highest/lowest
+                mkt_rates = df.groupby("Country")["Pass Flag"].mean() * 100
+                if len(mkt_rates) > 1:
+                    if rate >= mkt_rates.max():
+                        delta = "highest in region"
+                        delta_type = "positive"
+                    elif rate <= mkt_rates.min():
+                        delta = "lowest in region"
+                        delta_type = "negative"
+                    else:
+                        delta = f"{kpis.get('Total Passed', 0):,} passed"
+                else:
+                    delta = f"{kpis.get('Total Passed', 0):,} passed"
+            else:
+                delta = f"{kpis.get('Total Passed', 0):,} passed" if "Total Passed" in kpis else None
         st.markdown(render_kpi_card("Passing Rate", val, delta, delta_type), unsafe_allow_html=True)
 
     with kpi_col5:
         val = f"{kpis.get('Avg Assessment Score', 'N/A')}%" if "Avg Assessment Score" in kpis else "N/A"
         delta_type = "positive" if kpis.get("Avg Assessment Score", 0) >= 75 else "negative" if kpis.get("Avg Assessment Score", 0) < 60 else "neutral"
-        st.markdown(render_kpi_card("Product Knowledge", val, "avg assessment score", delta_type), unsafe_allow_html=True)
+        delta = "avg assessment score"
+        st.markdown(render_kpi_card("Product Knowledge", val, delta, delta_type), unsafe_allow_html=True)
 
     # Row 2: Secondary metrics (smaller cards)
     sec_col1, sec_col2, sec_col3, sec_col4, sec_col5 = st.columns(5)
@@ -1872,11 +2112,27 @@ if df is not None and len(df) > 0:
         top_accounts = acct_breakdown.head(6)
         acct_card_cols = st.columns(min(len(top_accounts), 3))
 
+        # Compute market average for comparison context
+        _mkt_avg_pass = acct_breakdown["Pass Rate"].mean() if "Pass Rate" in acct_breakdown.columns else None
+        _pass_rank = acct_breakdown.sort_values("Pass Rate", ascending=False).reset_index(drop=True) if "Pass Rate" in acct_breakdown.columns else None
+
         for i, (_, row) in enumerate(top_accounts.iterrows()):
             with acct_card_cols[i % 3]:
                 acct_name = row["Account"]
                 trainings = int(row["Trainings"])
-                parts = [f"<strong style='font-size:0.95rem;'>{acct_name}</strong>", f"📋 {trainings:,} trainings"]
+
+                # Ranking badge
+                rank_badge = ""
+                if _pass_rank is not None and len(_pass_rank) > 1:
+                    rank_pos = _pass_rank[_pass_rank["Account"] == acct_name].index
+                    if len(rank_pos) > 0:
+                        pos = rank_pos[0] + 1
+                        if pos == 1:
+                            rank_badge = '<span style="font-size:0.6rem;background:#ECFDF5;color:#10B981;padding:2px 6px;border-radius:100px;font-weight:600;margin-left:6px;">#1 Pass Rate</span>'
+                        elif pos == len(_pass_rank):
+                            rank_badge = '<span style="font-size:0.6rem;background:#FEF2F2;color:#EF4444;padding:2px 6px;border-radius:100px;font-weight:600;margin-left:6px;">Lowest</span>'
+
+                parts = [f"<strong style='font-size:0.95rem;'>{acct_name}</strong>{rank_badge}", f"📋 {trainings:,} trainings"]
                 if "Frontliners" in row and row["Frontliners"] > 0:
                     parts.append(f"👥 {int(row['Frontliners']):,} frontliners")
                 else:
@@ -1887,8 +2143,15 @@ if df is not None and len(df) > 0:
                     parts.append(f"🏪 {int(row['Stores']):,} stores")
                 if "Pass Rate" in row and pd.notna(row["Pass Rate"]):
                     rate = row["Pass Rate"]
-                    color = "#2ecc71" if rate >= 80 else "#e74c3c" if rate < 70 else "#FFB74D"
-                    parts.append(f'✅ <span style="color:{color};font-weight:600;">{rate:.1f}%</span> pass rate')
+                    color = "#10B981" if rate >= 80 else "#EF4444" if rate < 70 else "#F59E0B"
+                    vs_avg = ""
+                    if _mkt_avg_pass is not None and len(acct_breakdown) > 1:
+                        diff = round(rate - _mkt_avg_pass, 1)
+                        if diff > 0:
+                            vs_avg = f' <span style="font-size:0.7rem;color:#10B981;">+{diff} vs avg</span>'
+                        elif diff < 0:
+                            vs_avg = f' <span style="font-size:0.7rem;color:#EF4444;">{diff} vs avg</span>'
+                    parts.append(f'<span style="color:{color};font-weight:600;">{rate:.1f}%</span> pass rate{vs_avg}')
                 if "Avg Score" in row and pd.notna(row["Avg Score"]):
                     parts.append(f"📝 {row['Avg Score']:.1f}% avg score")
                 if "AR Lift (pp)" in row and pd.notna(row["AR Lift (pp)"]):
@@ -1947,14 +2210,57 @@ if df is not None and len(df) > 0:
 
     # === TAB 1: OVERVIEW & INSIGHTS ===
     with tab_overview:
-        # AI Insights
-        insights = generate_ai_insights(df, metrics, kpis)
-        if insights:
+        # Determine view level for insights
+        _n_countries = df["Country"].nunique() if "Country" in df.columns else 0
+        if _n_countries > 1:
+            _view_level = "regional"
+        elif _n_countries == 1:
+            _view_level = "market"
+        else:
+            _view_level = "account"
+        _insight_market = df["Country"].iloc[0] if _n_countries == 1 and len(df) > 0 else None
+
+        # Executive Insights
+        exec_insights = generate_executive_insights(df, metrics, kpis, _view_level, _insight_market)
+        if exec_insights:
             st.markdown('<div class="section-header">Key Insights</div>', unsafe_allow_html=True)
             cols = st.columns(2)
-            for i, (icon, text) in enumerate(insights):
+            for i, (status, headline, detail) in enumerate(exec_insights):
                 with cols[i % 2]:
-                    st.markdown(f'<div class="insight-box">{icon} {text}</div>', unsafe_allow_html=True)
+                    st.markdown(render_insight_card(status, headline, detail), unsafe_allow_html=True)
+
+        # Training Method Comparison
+        if metrics.get("Training Type") and metrics.get("Pass Flag") and df["Training Type"].nunique() > 1:
+            st.markdown('<div class="section-header">Training Method Comparison</div>', unsafe_allow_html=True)
+            method_comp = df.groupby("Training Type").agg(
+                sessions=("Training Type", "count"),
+                pass_rate=("Pass Flag", "mean")
+            ).reset_index()
+            method_comp["pass_rate"] = (method_comp["pass_rate"] * 100).round(1)
+            method_comp = method_comp.sort_values("pass_rate", ascending=False)
+            for _, row in method_comp.iterrows():
+                st.markdown(f"""
+                <div class="method-row">
+                    <span class="method-name">{row["Training Type"]}</span>
+                    <span class="method-stat">{row["sessions"]:,} records</span>
+                    <span class="method-rate">{row["pass_rate"]}%</span>
+                </div>
+                """, unsafe_allow_html=True)
+
+        # Needs Attention
+        attention_items = generate_needs_attention(df, metrics, kpis, _view_level)
+        if attention_items:
+            st.markdown('<div class="section-header">Needs Attention</div>', unsafe_allow_html=True)
+            items_html = ""
+            for i, (entity, reason, metric_str) in enumerate(attention_items, 1):
+                items_html += f"""
+                <div class="attention-item">
+                    <span class="attention-rank">{i}.</span>
+                    <span class="attention-text">{entity} — {reason}</span>
+                    <span class="attention-metric">{metric_str}</span>
+                </div>
+                """
+            st.markdown(f'<div class="attention-list">{items_html}</div>', unsafe_allow_html=True)
 
         # Ask the Data section
         st.markdown("")
