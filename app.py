@@ -65,16 +65,17 @@ st.markdown("""
 
     /* ═══ TYPOGRAPHY ═══ */
     .dash-title {
-        font-size: 1.35rem;
-        font-weight: 700;
+        font-size: 1.5rem !important;
+        font-weight: 800 !important;
         color: #111827 !important;
-        margin: 0;
+        margin: 0 !important;
         line-height: 1.2;
+        letter-spacing: -0.02em;
     }
     .dash-subtitle {
-        font-size: 0.75rem;
+        font-size: 0.78rem !important;
         color: #6B7280 !important;
-        margin: 2px 0 0;
+        margin: 2px 0 0 !important;
         font-weight: 400;
         letter-spacing: 0.3px;
     }
@@ -93,7 +94,7 @@ st.markdown("""
         display: flex;
         flex-wrap: wrap;
         gap: 6px;
-        margin: 8px 0 12px;
+        margin: 4px 0 8px;
     }
     .chip {
         display: inline-flex;
@@ -177,10 +178,14 @@ st.markdown("""
         box-shadow: 0 1px 2px rgba(0,0,0,0.03);
     }
     .kpi-card-sm .kpi-value {
-        font-size: clamp(1rem, 3vw, 1.25rem);
+        font-size: clamp(0.75rem, 2vw, 1rem);
         font-weight: 700;
         color: #374151 !important;
         margin: 4px 0 2px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 100%;
     }
     .kpi-card-sm .kpi-label {
         font-size: 0.58rem;
@@ -189,6 +194,10 @@ st.markdown("""
     .kpi-card-sm .kpi-delta {
         font-size: 0.6rem;
         color: #9CA3AF !important;
+    }
+    /* De-emphasize N/A or 0 values */
+    .kpi-card-sm.muted {
+        opacity: 0.5;
     }
 
     /* ═══ INSIGHT / INFO BOXES ═══ */
@@ -312,11 +321,11 @@ st.markdown("""
 
     /* ═══ REDUCE STREAMLIT PADDING ═══ */
     .block-container {
-        padding-top: 1.5rem !important;
-        padding-bottom: 1rem !important;
+        padding-top: 1rem !important;
+        padding-bottom: 0.5rem !important;
     }
     [data-testid="stSidebar"] .block-container {
-        padding-top: 1.2rem !important;
+        padding-top: 1rem !important;
     }
 
     /* ═══ FILTER HEADER IN SIDEBAR ═══ */
@@ -760,44 +769,44 @@ def generate_ai_insights(df, metrics, kpis):
     if "Pass Rate" in kpis:
         rate = kpis["Pass Rate"]
         if rate >= 85:
-            insights.append(("✅", f"Excellent pass rate of **{rate}%** — training content is effective."))
+            insights.append(("", f"Pass rate is {rate}%, indicating strong assessment performance across the current selection."))
         elif rate >= 70:
-            insights.append(("⚠️", f"Pass rate at **{rate}%** — review assessment difficulty or add pre-training materials."))
+            insights.append(("", f"Pass rate at {rate}% — consider reviewing assessment difficulty or adding pre-training materials."))
         else:
-            insights.append(("🚨", f"Pass rate of **{rate}%** is low — content may need simplification."))
+            insights.append(("", f"Pass rate of {rate}% is below target — content or delivery may need adjustment."))
 
     if "Avg Assessment Score" in kpis:
         score = kpis["Avg Assessment Score"]
         if score >= 80:
-            insights.append(("✅", f"Strong average score of **{score}%** across all learners."))
+            insights.append(("", f"Average assessment score of {score}% across all learners."))
         elif score >= 60:
-            insights.append(("⚠️", f"Average score is **{score}%** — consider additional practice exercises."))
+            insights.append(("", f"Average score is {score}% — consider additional practice exercises."))
         else:
-            insights.append(("🚨", f"Average score of **{score}%** suggests comprehension gaps."))
+            insights.append(("", f"Average score of {score}% suggests comprehension gaps."))
 
     if "Attach Improvement" in kpis:
         imp = kpis["Attach Improvement"]
         if imp > 0:
-            insights.append(("📈", f"Training drives **+{imp}pp** attach rate improvement. ROI is positive."))
+            insights.append(("", f"Attach rate improved by +{imp}pp post-training (30-day window)."))
         else:
-            insights.append(("📉", f"Attach rate **declined** by {abs(imp)}pp post-training. Investigate."))
+            insights.append(("", f"Attach rate declined by {abs(imp)}pp post-training. Investigate contributing factors."))
 
     if metrics.get("Account") and metrics.get("Pass Flag"):
         acct_pass = df.groupby("Account")["Pass Flag"].mean().sort_values(ascending=False)
         if len(acct_pass) > 1:
             top = acct_pass.index[0]
             top_rate = acct_pass.iloc[0] * 100
-            insights.append(("🏆", f"**{top}** is top-performing with **{top_rate:.0f}%** pass rate."))
+            insights.append(("", f"{top} is top-performing with {top_rate:.0f}% pass rate."))
             bottom = acct_pass.index[-1]
             bottom_rate = acct_pass.iloc[-1] * 100
             if bottom_rate < 70:
-                insights.append(("🎯", f"**{bottom}** needs attention — only **{bottom_rate:.0f}%** pass rate."))
+                insights.append(("", f"{bottom} needs attention — only {bottom_rate:.0f}% pass rate."))
 
     if "Total Sessions" in kpis and "Unique Learners" in kpis:
-        insights.append(("📊", f"**{kpis['Total Sessions']}** sessions trained **{kpis['Unique Learners']}** unique learners."))
+        insights.append(("", f"{kpis['Total Sessions']:,} sessions trained {kpis['Unique Learners']:,} unique learners."))
 
     if "Stores" in kpis:
-        insights.append(("🏪", f"Training reached **{kpis['Stores']}** stores across **{kpis.get('Countries', '?')}** markets."))
+        insights.append(("", f"Training reached {kpis['Stores']:,} stores across {kpis.get('Countries', '?')} markets."))
 
     return insights
 
@@ -1301,13 +1310,15 @@ def compute_store_completion(df, duration_days=30, reference_date=None):
     }
 
 
-def render_kpi_card(label, value, delta=None, delta_type="neutral", size="primary"):
-    """Render a styled KPI card. size='primary' or 'secondary'."""
+def render_kpi_card(label, value, delta=None, delta_type="neutral", size="primary", muted=False):
+    """Render a styled KPI card. size='primary' or 'secondary'. muted=True for N/A values."""
     delta_html = ""
     if delta:
         css_class = delta_type if delta_type in ("positive", "negative") else ""
         delta_html = f'<div class="kpi-delta {css_class}">{delta}</div>'
     card_class = "kpi-card" if size == "primary" else "kpi-card-sm"
+    if muted:
+        card_class += " muted"
     return f"""
     <div class="{card_class}">
         <div class="kpi-label">{label}</div>
@@ -1575,10 +1586,10 @@ if df is not None and len(df) > 0:
     chips_html = "".join(f'<span class="chip">{c}</span>' for c in chips)
     st.markdown(f'<div class="chip-row">{chips_html}</div>', unsafe_allow_html=True)
 
-    # Active filter chips
+    # Active filter chips — only show meaningful non-default selections
     filter_chips = []
     try:
-        if selected_preset:
+        if selected_preset and selected_preset not in ("Year to Date (2026)", "All Time"):
             filter_chips.append(("Date", selected_preset))
     except NameError:
         pass
@@ -1643,15 +1654,16 @@ if df is not None and len(df) > 0:
         st.markdown(render_kpi_card("Product Knowledge", val, "avg assessment score", delta_type), unsafe_allow_html=True)
 
     # Row 2: Secondary metrics (smaller cards)
-    st.markdown("")
     sec_col1, sec_col2, sec_col3, sec_col4, sec_col5 = st.columns(5)
 
     with sec_col1:
         if "Avg Attach Before" in kpis:
             val = f"{kpis['Avg Attach Before']}%"
+            is_muted = kpis['Avg Attach Before'] == 0
         else:
             val = "N/A"
-        st.markdown(render_kpi_card("Attach Before", val, "pre-training", size="secondary"), unsafe_allow_html=True)
+            is_muted = True
+        st.markdown(render_kpi_card("Attach Before", val, "pre-training", size="secondary", muted=is_muted), unsafe_allow_html=True)
 
     with sec_col2:
         if "Avg Attach After" in kpis:
@@ -1659,11 +1671,13 @@ if df is not None and len(df) > 0:
             imp = kpis.get("Attach Improvement", 0)
             delta = f"+{imp}pp" if imp > 0 else f"{imp}pp"
             delta_type = "positive" if imp > 0 else "negative" if imp < 0 else "neutral"
+            is_muted = False
         else:
             val = "N/A"
             delta = "post-training"
             delta_type = "neutral"
-        st.markdown(render_kpi_card("Attach After", val, delta, delta_type, size="secondary"), unsafe_allow_html=True)
+            is_muted = True
+        st.markdown(render_kpi_card("Attach After", val, delta, delta_type, size="secondary", muted=is_muted), unsafe_allow_html=True)
 
     with sec_col3:
         val = f"{kpis.get('Countries', 0)}"
