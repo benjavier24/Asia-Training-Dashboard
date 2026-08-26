@@ -15,16 +15,30 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS - Modern light executive design
+# Custom CSS - Phase 1: Visual Foundation
 st.markdown("""
 <style>
-    /* Force light theme feel */
-    .stApp {
-        background: linear-gradient(135deg, #f5f7fa 0%, #e8ecf1 100%);
-        color: #1a1a2e !important;
-    }
+    /* ═══ DESIGN SYSTEM ═══ */
+    /* Palette:
+       Brand: #E63946 (bolttech red)
+       Analytics: #0891B2 (teal-600)
+       Analytics Light: #06B6D4 (cyan-500)
+       Success: #10B981 (emerald-500)
+       Warning: #F59E0B (amber-500)
+       Critical: #EF4444 (red-500)
+       Neutral-900: #111827
+       Neutral-700: #374151
+       Neutral-500: #6B7280
+       Neutral-300: #D1D5DB
+       Neutral-100: #F3F4F6
+       White: #FFFFFF
+       Bg: #F8FAFC
+    */
 
-    /* Force all text to dark on light background regardless of system theme */
+    /* ═══ GLOBAL ═══ */
+    .stApp {
+        background: #F8FAFC !important;
+    }
     .stApp, .stApp p, .stApp span, .stApp li, .stApp label, .stApp div,
     .stMarkdown, .stMarkdown p, .stMarkdown span,
     [data-testid="stMarkdownContainer"],
@@ -33,11 +47,11 @@ st.markdown("""
     [data-testid="stMarkdownContainer"] li,
     [data-testid="stMarkdownContainer"] h1,
     [data-testid="stMarkdownContainer"] h2,
-    [data-testid="stMarkdownContainer"] h3 {
-        color: #1a1a2e !important;
+    [data-testid="stMarkdownContainer"] h3,
+    [data-testid="stMarkdownContainer"] h4 {
+        color: #111827 !important;
+        font-family: 'Inter', 'Segoe UI', -apple-system, sans-serif;
     }
-
-    /* Sidebar text */
     [data-testid="stSidebar"],
     [data-testid="stSidebar"] p,
     [data-testid="stSidebar"] span,
@@ -45,216 +59,276 @@ st.markdown("""
     [data-testid="stSidebar"] div {
         color: #374151 !important;
     }
-
-    /* Caption / muted text */
     .stCaption, [data-testid="stCaptionContainer"] {
-        color: #6b7280 !important;
+        color: #6B7280 !important;
     }
 
-    .main-header {
-        font-size: 1.8rem;
+    /* ═══ TYPOGRAPHY ═══ */
+    .dash-title {
+        font-size: 1.35rem;
         font-weight: 700;
-        color: #1a1a2e;
-        margin-bottom: 0.2rem;
-        font-family: 'Segoe UI', sans-serif;
+        color: #111827 !important;
+        margin: 0;
+        line-height: 1.2;
     }
-    .sub-header {
-        font-size: 0.85rem;
-        color: #6b7280;
-        margin-bottom: 1.5rem;
+    .dash-subtitle {
+        font-size: 0.75rem;
+        color: #6B7280 !important;
+        margin: 2px 0 0;
+        font-weight: 400;
+        letter-spacing: 0.3px;
     }
-</style>
-""", unsafe_allow_html=True)
+    .section-header {
+        font-size: 0.9rem;
+        font-weight: 700;
+        color: #111827 !important;
+        margin: 1.2rem 0 0.6rem;
+        padding-bottom: 6px;
+        border-bottom: 1px solid #E5E7EB;
+        letter-spacing: -0.01em;
+    }
 
-# Additional CSS for executive layout
-st.markdown("""
-<style>
-    /* KPI Cards - floating white cards with shadow */
+    /* ═══ CHIP / PILL STYLES ═══ */
+    .chip-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin: 8px 0 12px;
+    }
+    .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 10px;
+        border-radius: 100px;
+        font-size: 0.68rem;
+        font-weight: 500;
+        background: #F3F4F6;
+        color: #374151 !important;
+        border: 1px solid #E5E7EB;
+        white-space: nowrap;
+    }
+    .chip.active {
+        background: #ECFEFF;
+        border-color: #0891B2;
+        color: #0891B2 !important;
+        font-weight: 600;
+    }
+
+    /* ═══ PRIMARY KPI CARDS ═══ */
     .kpi-card {
-        background: #ffffff;
-        border-radius: 16px;
-        padding: 22px 14px;
+        background: #FFFFFF;
+        border-radius: 12px;
+        padding: 18px 14px;
         text-align: center;
-        border: none;
-        height: 140px;
+        border: 1px solid #F3F4F6;
+        height: 120px;
         display: flex;
         flex-direction: column;
         justify-content: center;
         align-items: center;
         overflow: hidden;
-        box-shadow: 0 2px 12px rgba(0,0,0,0.06);
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        transition: box-shadow 0.15s ease;
     }
     .kpi-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(0,186,199,0.12);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.07);
     }
     .kpi-value {
-        font-size: clamp(1.2rem, 4vw, 1.8rem);
+        font-size: clamp(1.3rem, 3.5vw, 1.7rem);
         font-weight: 800;
-        color: #00BAC7 !important;
-        line-height: 1.1;
-        margin: 8px 0 4px;
+        color: #0891B2 !important;
+        line-height: 1;
+        margin: 6px 0 3px;
         word-break: break-word;
         overflow-wrap: break-word;
         max-width: 100%;
+        letter-spacing: -0.02em;
     }
     .kpi-label {
-        font-size: 0.7rem;
+        font-size: 0.62rem;
         text-transform: uppercase;
-        letter-spacing: 0.8px;
+        letter-spacing: 0.6px;
         font-weight: 600;
-        color: #6b7280 !important;
+        color: #6B7280 !important;
     }
     .kpi-delta {
-        font-size: 0.72rem;
-        margin-top: 4px;
-        color: #9ca3af !important;
+        font-size: 0.65rem;
+        margin-top: 3px;
+        color: #9CA3AF !important;
+        font-weight: 400;
     }
-    .kpi-delta.positive { color: #10b981 !important; font-weight: 600; }
-    .kpi-delta.negative { color: #ef4444 !important; font-weight: 600; }
+    .kpi-delta.positive { color: #10B981 !important; font-weight: 600; }
+    .kpi-delta.negative { color: #EF4444 !important; font-weight: 600; }
 
-    /* Hero banner for context */
-    .hero-banner {
-        background: linear-gradient(135deg, #00BAC7 0%, #170F4F 100%);
-        border-radius: 16px;
-        padding: 24px 28px;
-        margin-bottom: 1.2rem;
-        color: white;
-        box-shadow: 0 4px 20px rgba(0,186,199,0.2);
+    /* ═══ SECONDARY KPI CARDS ═══ */
+    .kpi-card-sm {
+        background: #FFFFFF;
+        border-radius: 10px;
+        padding: 12px 10px;
+        text-align: center;
+        border: 1px solid #F3F4F6;
+        height: 90px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        overflow: hidden;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.03);
     }
-    .hero-banner h3 {
-        margin: 0 0 4px;
-        font-size: 1.1rem;
-        font-weight: 600;
-        color: white;
-    }
-    .hero-banner p {
-        margin: 0;
-        font-size: 0.8rem;
-        opacity: 0.8;
-    }
-
-    /* Insight boxes */
-    .insight-box {
-        background: #ffffff;
-        border-radius: 12px;
-        padding: 14px 18px;
-        border-left: 4px solid #00BAC7;
-        margin: 6px 0;
+    .kpi-card-sm .kpi-value {
+        font-size: clamp(1rem, 3vw, 1.25rem);
+        font-weight: 700;
         color: #374151 !important;
-        font-size: 0.88rem;
-        box-shadow: 0 1px 6px rgba(0,0,0,0.04);
+        margin: 4px 0 2px;
+    }
+    .kpi-card-sm .kpi-label {
+        font-size: 0.58rem;
+        color: #9CA3AF !important;
+    }
+    .kpi-card-sm .kpi-delta {
+        font-size: 0.6rem;
+        color: #9CA3AF !important;
+    }
+
+    /* ═══ INSIGHT / INFO BOXES ═══ */
+    .insight-box {
+        background: #FFFFFF;
+        border-radius: 10px;
+        padding: 12px 16px;
+        border-left: 3px solid #0891B2;
+        margin: 5px 0;
+        color: #374151 !important;
+        font-size: 0.82rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+        line-height: 1.5;
     }
     .warning-box {
-        background: #ffffff;
-        border-radius: 12px;
-        padding: 14px 18px;
-        border-left: 4px solid #f59e0b;
-        margin: 6px 0;
+        background: #FFFFFF;
+        border-radius: 10px;
+        padding: 12px 16px;
+        border-left: 3px solid #F59E0B;
+        margin: 5px 0;
         color: #374151 !important;
-        font-size: 0.88rem;
-        box-shadow: 0 1px 6px rgba(0,0,0,0.04);
+        font-size: 0.82rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+        line-height: 1.5;
     }
-    .positive { color: #10b981 !important; font-weight: 600; }
-    .negative { color: #ef4444 !important; font-weight: 600; }
+    .positive { color: #10B981 !important; font-weight: 600; }
+    .negative { color: #EF4444 !important; font-weight: 600; }
 
-    /* Section headers */
-    .section-header {
-        font-size: 1.05rem;
-        font-weight: 700;
-        color: #1a1a2e !important;
-        margin: 1.8rem 0 0.8rem;
-        padding-bottom: 8px;
-        border-bottom: 2px solid #e5e7eb;
-    }
+    /* ═══ DATA AVAILABILITY ═══ */
+    .data-avail-present { color: #10B981; }
+    .data-avail-missing { color: #EF4444; opacity: 0.7; }
 
-    /* Data availability */
-    .data-avail-present { color: #10b981; }
-    .data-avail-missing { color: #ef4444; opacity: 0.7; }
-
-    /* Tab styling */
+    /* ═══ TABS ═══ */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 4px;
-        background: #ffffff;
-        border-radius: 12px;
-        padding: 4px;
-        box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+        gap: 2px;
+        background: #FFFFFF;
+        border-radius: 10px;
+        padding: 3px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        border: 1px solid #F3F4F6;
     }
     .stTabs [data-baseweb="tab"] {
-        padding: 10px 22px;
-        border-radius: 8px;
+        padding: 8px 18px;
+        border-radius: 7px;
         font-weight: 500;
+        font-size: 0.8rem;
     }
     .stTabs [data-baseweb="tab"][aria-selected="true"] {
-        background: #00BAC7 !important;
+        background: #0891B2 !important;
         color: white !important;
     }
 
-    /* Account cards in performance tab */
+    /* ═══ ACCOUNT CARDS (Performance tab) ═══ */
     .account-card {
         display: flex;
         align-items: center;
         gap: 12px;
-        margin-bottom: 8px;
-        padding: 12px 16px;
-        border-radius: 12px;
-        background: #ffffff;
-        border: 1px solid #e5e7eb;
-        box-shadow: 0 1px 4px rgba(0,0,0,0.03);
+        margin-bottom: 6px;
+        padding: 10px 14px;
+        border-radius: 10px;
+        background: #FFFFFF;
+        border: 1px solid #F3F4F6;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.02);
     }
     .account-card .name {
         font-weight: 600;
-        font-size: 0.85rem;
-        color: #1a1a2e !important;
+        font-size: 0.82rem;
+        color: #111827 !important;
     }
     .account-card .bar-bg {
-        background: #e5e7eb;
+        background: #E5E7EB;
         border-radius: 4px;
-        height: 8px;
+        height: 6px;
         width: 100%;
-        margin-top: 4px;
+        margin-top: 3px;
     }
 
-    /* Sidebar styling */
+    /* ═══ SIDEBAR ═══ */
     [data-testid="stSidebar"] {
-        background: #ffffff !important;
-        border-right: 1px solid #e5e7eb;
+        background: #FFFFFF !important;
+        border-right: 1px solid #E5E7EB;
     }
-
-    /* Streamlit elements styling */
-    .stSelectbox label, .stDateInput label, .stSlider label {
+    [data-testid="stSidebar"] .stSelectbox label,
+    [data-testid="stSidebar"] .stDateInput label,
+    [data-testid="stSidebar"] .stSlider label {
         color: #374151 !important;
         font-weight: 500;
+        font-size: 0.78rem;
     }
 
-    /* Make multiselect tags more readable */
+    /* ═══ TAGS ═══ */
     span[data-baseweb="tag"] {
-        background-color: rgba(0,186,199,0.12) !important;
-        border-color: rgba(0,186,199,0.3) !important;
+        background-color: #ECFEFF !important;
+        border-color: #0891B2 !important;
     }
     span[data-baseweb="tag"] span {
-        color: #00838f !important;
+        color: #0891B2 !important;
     }
 
-    /* Dataframe containers */
+    /* ═══ DATAFRAMES ═══ */
     [data-testid="stDataFrame"] {
-        border-radius: 12px;
+        border-radius: 10px;
         overflow: hidden;
-        box-shadow: 0 1px 6px rgba(0,0,0,0.04);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        border: 1px solid #F3F4F6;
     }
 
-    /* Metric cards */
+    /* ═══ METRICS ═══ */
     [data-testid="stMetric"] {
-        background: #ffffff;
-        border-radius: 12px;
-        padding: 12px;
-        box-shadow: 0 1px 6px rgba(0,0,0,0.04);
+        background: #FFFFFF;
+        border-radius: 10px;
+        padding: 10px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        border: 1px solid #F3F4F6;
     }
 
-    /* Plotly chart containers */
+    /* ═══ PLOTLY ═══ */
     .js-plotly-plot {
-        border-radius: 12px;
+        border-radius: 10px;
+    }
+
+    /* ═══ REDUCE STREAMLIT PADDING ═══ */
+    .block-container {
+        padding-top: 1.5rem !important;
+        padding-bottom: 1rem !important;
+    }
+    [data-testid="stSidebar"] .block-container {
+        padding-top: 1.2rem !important;
+    }
+
+    /* ═══ FILTER HEADER IN SIDEBAR ═══ */
+    .sidebar-title {
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+        color: #9CA3AF !important;
+        margin-bottom: 12px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid #E5E7EB;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -1227,14 +1301,15 @@ def compute_store_completion(df, duration_days=30, reference_date=None):
     }
 
 
-def render_kpi_card(label, value, delta=None, delta_type="neutral"):
-    """Render a styled KPI card."""
+def render_kpi_card(label, value, delta=None, delta_type="neutral", size="primary"):
+    """Render a styled KPI card. size='primary' or 'secondary'."""
     delta_html = ""
     if delta:
         css_class = delta_type if delta_type in ("positive", "negative") else ""
         delta_html = f'<div class="kpi-delta {css_class}">{delta}</div>'
+    card_class = "kpi-card" if size == "primary" else "kpi-card-sm"
     return f"""
-    <div class="kpi-card">
+    <div class="{card_class}">
         <div class="kpi-label">{label}</div>
         <div class="kpi-value">{value}</div>
         {delta_html}
@@ -1247,8 +1322,8 @@ def render_kpi_card(label, value, delta=None, delta_type="neutral"):
 # Header row with title and data status
 header_col1, header_col2 = st.columns([3, 1])
 with header_col1:
-    st.markdown('<div class="main-header">📊 Asia Training Dashboard</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-header">bolttech · Executive Training Analytics</div>', unsafe_allow_html=True)
+    st.markdown('<p class="dash-title">Asia Training Dashboard</p>', unsafe_allow_html=True)
+    st.markdown('<p class="dash-subtitle">Executive Training Analytics</p>', unsafe_allow_html=True)
 
 # === DATA LOADING ===
 MASTER_FILE = r"c:\Users\BenjJavier\OneDrive - bolttech\Documents\Copilot\Created\Asia Training Dashboard v1.xlsx"
@@ -1383,7 +1458,7 @@ if df is not None and len(df) > 0:
 
     # ─── SIDEBAR FILTERS ───
     with st.sidebar:
-        st.markdown("### 🔍 Filters")
+        st.markdown('<div class="sidebar-title">Filters</div>', unsafe_allow_html=True)
 
         # Date range
         if metrics.get("Date") and len(df) > 0:
@@ -1406,7 +1481,7 @@ if df is not None and len(df) > 0:
             }
 
             selected_preset = st.selectbox(
-                "📅 Date Range",
+                "Date Range",
                 options=list(date_presets.keys()),
                 index=0
             )
@@ -1427,50 +1502,50 @@ if df is not None and len(df) > 0:
         # Country / Market
         if metrics.get("Country") and len(df) > 0:
             country_opts = ["All"] + sorted(df["Country"].dropna().unique().tolist())
-            sel_countries = st.selectbox("🌏 Market", options=country_opts, index=0)
+            sel_countries = st.selectbox("Market", options=country_opts, index=0)
             if sel_countries != "All":
                 df = df[df["Country"] == sel_countries]
 
         # Account / Partner
         if metrics.get("Account") and len(df) > 0:
             acct_opts = ["All"] + sorted(df["Account"].dropna().unique().tolist())
-            sel_account = st.selectbox("🏢 Account / Partner", options=acct_opts, index=0)
+            sel_account = st.selectbox("Account / Partner", options=acct_opts, index=0)
             if sel_account != "All":
                 df = df[df["Account"] == sel_account]
 
         # Training Name
         if metrics.get("Training Name") and len(df) > 0:
             training_opts = ["All"] + sorted(df["Training Name"].dropna().unique().tolist())
-            sel_training = st.selectbox("📚 Training Name", options=training_opts, index=0)
+            sel_training = st.selectbox("Training Name", options=training_opts, index=0)
             if sel_training != "All":
                 df = df[df["Training Name"] == sel_training]
 
         # Trainer
         if metrics.get("Trainer") and len(df) > 0:
             trainer_opts = ["All"] + sorted(df["Trainer"].dropna().unique().tolist())
-            sel_trainer = st.selectbox("👤 Trainer", options=trainer_opts, index=0)
+            sel_trainer = st.selectbox("Trainer", options=trainer_opts, index=0)
             if sel_trainer != "All":
                 df = df[df["Trainer"] == sel_trainer]
 
         # Training Type / Method
         if metrics.get("Training Type") and len(df) > 0:
             type_opts = ["All"] + sorted(df["Training Type"].dropna().unique().tolist())
-            sel_type = st.selectbox("🏷️ Training Type", options=type_opts, index=0)
+            sel_type = st.selectbox("Training Type", options=type_opts, index=0)
             if sel_type != "All":
                 df = df[df["Training Type"] == sel_type]
 
         # Store
         if metrics.get("Store") and len(df) > 0:
             store_opts = ["All"] + sorted(df["Store"].dropna().unique().tolist())
-            sel_store = st.selectbox("🏪 Store", options=store_opts, index=0)
+            sel_store = st.selectbox("Store", options=store_opts, index=0)
             if sel_store != "All":
                 df = df[df["Store"] == sel_store]
 
         # Filtered count
         st.markdown(f"""
-        <div style="background:rgba(0,186,199,0.1); border-radius:8px; padding:10px 14px; text-align:center; margin:12px 0; border:1px solid rgba(0,186,199,0.3);">
-            <span style="font-size:1.4rem; font-weight:700; color:#00BAC7;">{len(df):,}</span>
-            <span style="opacity:0.7; font-size:0.85rem;"> records</span>
+        <div style="background:#F3F4F6; border-radius:8px; padding:8px 12px; text-align:center; margin:12px 0;">
+            <span style="font-size:1.1rem; font-weight:700; color:#0891B2;">{len(df):,}</span>
+            <span style="color:#6B7280; font-size:0.75rem;"> records</span>
         </div>
         """, unsafe_allow_html=True)
 
@@ -1479,30 +1554,65 @@ if df is not None and len(df) > 0:
     metrics = detect_metrics(df)
     kpis = compute_kpis(df, metrics)
 
-    # ─── CONTEXT BANNER: Show active training name(s) ───
-    banner_title = ""
-    banner_sub = ""
-    if metrics.get("Training Name"):
-        unique_trainings = df["Training Name"].dropna().unique()
-        if len(unique_trainings) == 1:
-            banner_title = f"📚 {unique_trainings[0]}"
-        elif len(unique_trainings) <= 5:
-            banner_title = f"📚 {' · '.join(unique_trainings)}"
-        else:
-            banner_title = f"📚 {len(unique_trainings)} training programs"
-
+    # ─── COMPACT HEADER CHIPS (replaces hero banner) ───
+    # Summary chips: dynamic context about the current view
+    chips = []
     if metrics.get("Date") and len(df) > 0:
-        date_min = df["Date"].min().strftime("%b %d, %Y")
+        date_min = df["Date"].min().strftime("%b %d")
         date_max = df["Date"].max().strftime("%b %d, %Y")
-        banner_sub = f"📅 {date_min} → {date_max}"
+        chips.append(f"{date_min} – {date_max}")
+    if metrics.get("Training Name"):
+        n_programs = df["Training Name"].nunique()
+        chips.append(f"{n_programs} Programs")
+    if metrics.get("Account"):
+        n_accounts = df["Account"].nunique()
+        chips.append(f"{n_accounts} Partners")
+    if metrics.get("Country"):
+        n_countries = df["Country"].nunique()
+        chips.append(f"{n_countries} Markets")
+    chips.append(f"{len(df):,} records")
 
-    if banner_title or banner_sub:
-        st.markdown(f"""
-        <div class="hero-banner">
-            <h3>{banner_title}</h3>
-            <p>{banner_sub}</p>
-        </div>
-        """, unsafe_allow_html=True)
+    chips_html = "".join(f'<span class="chip">{c}</span>' for c in chips)
+    st.markdown(f'<div class="chip-row">{chips_html}</div>', unsafe_allow_html=True)
+
+    # Active filter chips
+    filter_chips = []
+    try:
+        if selected_preset:
+            filter_chips.append(("Date", selected_preset))
+    except NameError:
+        pass
+    try:
+        if sel_countries and sel_countries != "All":
+            filter_chips.append(("Market", sel_countries))
+    except NameError:
+        pass
+    try:
+        if sel_account and sel_account != "All":
+            filter_chips.append(("Partner", sel_account))
+    except NameError:
+        pass
+    try:
+        if sel_training and sel_training != "All":
+            filter_chips.append(("Training", sel_training))
+    except NameError:
+        pass
+    try:
+        if sel_trainer and sel_trainer != "All":
+            filter_chips.append(("Trainer", sel_trainer))
+    except NameError:
+        pass
+    try:
+        if sel_type and sel_type != "All":
+            filter_chips.append(("Type", sel_type))
+    except NameError:
+        pass
+
+    if filter_chips:
+        active_chips_html = "".join(
+            f'<span class="chip active">{label}: {val}</span>' for label, val in filter_chips
+        )
+        st.markdown(f'<div class="chip-row">{active_chips_html}</div>', unsafe_allow_html=True)
 
     # ─── EXECUTIVE KPI SUMMARY (top of page, big numbers) ───
 
@@ -1532,7 +1642,7 @@ if df is not None and len(df) > 0:
         delta_type = "positive" if kpis.get("Avg Assessment Score", 0) >= 75 else "negative" if kpis.get("Avg Assessment Score", 0) < 60 else "neutral"
         st.markdown(render_kpi_card("Product Knowledge", val, "avg assessment score", delta_type), unsafe_allow_html=True)
 
-    # Row 2: Attach Rate + coverage (same 5-column grid as Row 1)
+    # Row 2: Secondary metrics (smaller cards)
     st.markdown("")
     sec_col1, sec_col2, sec_col3, sec_col4, sec_col5 = st.columns(5)
 
@@ -1541,27 +1651,27 @@ if df is not None and len(df) > 0:
             val = f"{kpis['Avg Attach Before']}%"
         else:
             val = "N/A"
-        st.markdown(render_kpi_card("Attach Rate Before", val, "pre-training baseline"), unsafe_allow_html=True)
+        st.markdown(render_kpi_card("Attach Before", val, "pre-training", size="secondary"), unsafe_allow_html=True)
 
     with sec_col2:
         if "Avg Attach After" in kpis:
             val = f"{kpis['Avg Attach After']}%"
             imp = kpis.get("Attach Improvement", 0)
-            delta = f"+{imp}pp vs before" if imp > 0 else f"{imp}pp vs before"
+            delta = f"+{imp}pp" if imp > 0 else f"{imp}pp"
             delta_type = "positive" if imp > 0 else "negative" if imp < 0 else "neutral"
         else:
             val = "N/A"
-            delta = "30 days post-training"
+            delta = "post-training"
             delta_type = "neutral"
-        st.markdown(render_kpi_card("Attach Rate After", val, delta, delta_type), unsafe_allow_html=True)
+        st.markdown(render_kpi_card("Attach After", val, delta, delta_type, size="secondary"), unsafe_allow_html=True)
 
     with sec_col3:
         val = f"{kpis.get('Countries', 0)}"
-        st.markdown(render_kpi_card("Markets", val, "countries covered"), unsafe_allow_html=True)
+        st.markdown(render_kpi_card("Markets", val, size="secondary"), unsafe_allow_html=True)
 
     with sec_col4:
         val = f"{kpis.get('Accounts', 0)}"
-        st.markdown(render_kpi_card("Partners", val, "active accounts"), unsafe_allow_html=True)
+        st.markdown(render_kpi_card("Partners", val, size="secondary"), unsafe_allow_html=True)
 
     with sec_col5:
         if metrics.get("Training Type") and len(df) > 0:
@@ -1587,13 +1697,13 @@ if df is not None and len(df) > 0:
             top_method = method_sessions.index[0] if len(method_sessions) > 0 else "N/A"
             val = top_method
             delta = f"{method_sessions.iloc[0]:,} sessions"
-            st.markdown(render_kpi_card("Top Method", val, delta), unsafe_allow_html=True)
+            st.markdown(render_kpi_card("Top Method", val, delta, size="secondary"), unsafe_allow_html=True)
         elif "Total Training Hours" in kpis:
             val = f"{kpis['Total Training Hours']:,.0f}"
-            st.markdown(render_kpi_card("Training Hours", val), unsafe_allow_html=True)
+            st.markdown(render_kpi_card("Training Hours", val, size="secondary"), unsafe_allow_html=True)
         else:
             val = f"{len(df):,}"
-            st.markdown(render_kpi_card("Total Records", val, "in filtered view"), unsafe_allow_html=True)
+            st.markdown(render_kpi_card("Total Records", val, "in filtered view", size="secondary"), unsafe_allow_html=True)
 
 
     # ─── ACCOUNT BREAKDOWN (when a specific market is selected) ───
@@ -1608,14 +1718,14 @@ if df is not None and len(df) > 0:
 
     if selected_market and metrics.get("Account") and len(df) > 0 and df["Account"].nunique() > 1:
         st.markdown("---")
-        st.markdown(f'<div class="section-header">🏢 {selected_market} — Account Breakdown</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="section-header">{selected_market} — Account Breakdown</div>', unsafe_allow_html=True)
 
         # Training Name filter for the account breakdown
         breakdown_df = df.copy()
         if metrics.get("Training Name") and len(df) > 0:
             training_options = ["All Trainings"] + sorted(df["Training Name"].dropna().unique().tolist())
             sel_breakdown_training = st.selectbox(
-                "📚 Filter by Training Program",
+                "Filter by Training Program",
                 options=training_options,
                 index=0,
                 key="breakdown_training_filter"
@@ -1743,7 +1853,7 @@ if df is not None and len(df) > 0:
                         parts.append(f'<div style="margin-top:4px;border-top:1px solid rgba(0,186,199,0.15);padding-top:6px;"><span style="font-size:0.75rem;opacity:0.6;">TRAINERS</span>{trainer_lines}{suffix}</div>')
 
                 st.markdown(f"""
-                <div style="background:#ffffff; border:1px solid #e5e7eb; border-radius:14px; padding:18px; margin-bottom:12px; min-height:320px; box-shadow:0 2px 8px rgba(0,0,0,0.04);">
+                <div style="background:#FFFFFF; border:1px solid #E5E7EB; border-radius:12px; padding:16px; margin-bottom:10px; min-height:320px; box-shadow:0 1px 3px rgba(0,0,0,0.04);">
                     {"<br>".join(parts)}
                 </div>
                 """, unsafe_allow_html=True)
@@ -1760,7 +1870,7 @@ if df is not None and len(df) > 0:
     st.markdown("---")
 
     tab_overview, tab_performance, tab_trends, tab_data = st.tabs([
-        "📋 Overview & Insights", "🎯 Performance", "📈 Trends", "🗂️ Data & Export"
+        "Overview", "Performance", "Trends", "Data & Export"
     ])
 
     # === TAB 1: OVERVIEW & INSIGHTS ===
@@ -1768,7 +1878,7 @@ if df is not None and len(df) > 0:
         # AI Insights
         insights = generate_ai_insights(df, metrics, kpis)
         if insights:
-            st.markdown('<div class="section-header">💡 Key Insights</div>', unsafe_allow_html=True)
+            st.markdown('<div class="section-header">Key Insights</div>', unsafe_allow_html=True)
             cols = st.columns(2)
             for i, (icon, text) in enumerate(insights):
                 with cols[i % 2]:
@@ -1776,7 +1886,7 @@ if df is not None and len(df) > 0:
 
         # Ask the Data section
         st.markdown("")
-        st.markdown('<div class="section-header">🤖 Ask the Data</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header">Ask the Data</div>', unsafe_allow_html=True)
         st.markdown("""
         <div class="insight-box">
         Ask questions about your training data in plain English. Examples:<br>
@@ -1859,7 +1969,7 @@ if df is not None and len(df) > 0:
         # ─── TRAINING TYPE BREAKDOWN (Foundation / Activation / Reinforcement / Champion) ───
         st.markdown("")
         if metrics.get("Training Type") and len(df) > 0:
-            st.markdown('<div class="section-header">🏷️ Training Type Breakdown</div>', unsafe_allow_html=True)
+            st.markdown('<div class="section-header">Training Type Breakdown</div>', unsafe_allow_html=True)
 
             type_data = df["Training Type"].value_counts().reset_index()
             type_data.columns = ["Type", "Sessions"]
@@ -1934,7 +2044,7 @@ if df is not None and len(df) > 0:
 
         # ─── TRAINING NAMES SUMMARY TABLE ───
         if metrics.get("Training Name") and len(df) > 0:
-            st.markdown('<div class="section-header">📚 Training Programs Summary</div>', unsafe_allow_html=True)
+            st.markdown('<div class="section-header">Training Programs Summary</div>', unsafe_allow_html=True)
 
             training_agg = {"Sessions": ("Training Name", "count")}
             if metrics.get("Pass Flag"):
@@ -1972,7 +2082,7 @@ if df is not None and len(df) > 0:
 
         # ─── ATTACH RATE IMPACT (30 Days Post-Training) ───
         if metrics.get("Attach Rate Before") and metrics.get("Attach Rate After") and len(df) > 0:
-            st.markdown('<div class="section-header">📈 Attach Rate Impact — 30 Days Post-Training</div>', unsafe_allow_html=True)
+            st.markdown('<div class="section-header">Attach Rate Impact — 30 Days Post-Training</div>', unsafe_allow_html=True)
             st.markdown("""
             <div class="insight-box">
             Attach Rate data sourced from Power BI, measured 30 days after training delivery.
@@ -2035,7 +2145,7 @@ if df is not None and len(df) > 0:
 
         if metrics.get("Country"):
             with overview_col1:
-                st.markdown('<div class="section-header">🌏 Training by Market</div>', unsafe_allow_html=True)
+                st.markdown('<div class="section-header">Training by Market</div>', unsafe_allow_html=True)
                 country_data = df["Country"].value_counts().reset_index()
                 country_data.columns = ["Country", "Records"]
                 fig = px.pie(country_data, values="Records", names="Country",
@@ -2047,7 +2157,7 @@ if df is not None and len(df) > 0:
 
         if metrics.get("Account"):
             with overview_col2:
-                st.markdown('<div class="section-header">🏢 Training by Partner</div>', unsafe_allow_html=True)
+                st.markdown('<div class="section-header">Training by Partner</div>', unsafe_allow_html=True)
                 acct_data_overview = df["Account"].value_counts().reset_index()
                 acct_data_overview.columns = ["Account", "Records"]
                 fig = px.bar(acct_data_overview.head(10), x="Records", y="Account", orientation="h",
@@ -2064,7 +2174,7 @@ if df is not None and len(df) > 0:
         # Pass Rate by Account
         if metrics.get("Account") and metrics.get("Pass Flag"):
             with perf_col1:
-                st.markdown('<div class="section-header">🎯 Pass Rate by Account</div>', unsafe_allow_html=True)
+                st.markdown('<div class="section-header">Pass Rate by Account</div>', unsafe_allow_html=True)
                 acct_data = df.groupby("Account")["Pass Flag"].agg(["sum", "count"]).reset_index()
                 acct_data["Pass Rate (%)"] = (acct_data["sum"] / acct_data["count"] * 100).round(1)
                 acct_data = acct_data.sort_values("Pass Rate (%)", ascending=False)
@@ -2103,7 +2213,7 @@ if df is not None and len(df) > 0:
         # Trainer Performance
         if metrics.get("Trainer") and metrics.get("Pass Flag"):
             with perf_col2:
-                st.markdown('<div class="section-header">👤 Trainer Performance</div>', unsafe_allow_html=True)
+                st.markdown('<div class="section-header">Trainer Performance</div>', unsafe_allow_html=True)
                 t_data = df.groupby("Trainer").agg(
                     sessions=("Date", "count"),
                     pass_rate=("Pass Flag", "mean")
@@ -2119,7 +2229,7 @@ if df is not None and len(df) > 0:
 
         # Attach Rate Comparison
         if metrics.get("Attach Rate Before") and metrics.get("Attach Rate After") and metrics.get("Account"):
-            st.markdown('<div class="section-header">📈 Attach Rate: Before vs After Training (30 Days)</div>', unsafe_allow_html=True)
+            st.markdown('<div class="section-header">Attach Rate: Before vs After Training</div>', unsafe_allow_html=True)
 
             attach_df = df[df["Attach Rate Before"].notna() & df["Attach Rate After"].notna()]
             if len(attach_df) > 0:
@@ -2158,7 +2268,7 @@ if df is not None and len(df) > 0:
 
         # Store Performance Table
         if metrics.get("Store") and (metrics.get("Pass Flag") or metrics.get("Assessment Score")):
-            st.markdown('<div class="section-header">🏪 Store Performance</div>', unsafe_allow_html=True)
+            st.markdown('<div class="section-header">Store Performance</div>', unsafe_allow_html=True)
 
             store_col1, store_col2 = st.columns([3, 1])
 
@@ -2211,7 +2321,7 @@ if df is not None and len(df) > 0:
 
         # Store Completion Tracker
         if metrics.get("Store") and metrics.get("Date"):
-            st.markdown('<div class="section-header">🏪 Store Completion Tracker</div>', unsafe_allow_html=True)
+            st.markdown('<div class="section-header">Store Completion Tracker</div>', unsafe_allow_html=True)
             st.markdown("""
             <div class="insight-box">
             Track how many stores have been trained within a chosen time window. 
@@ -2295,7 +2405,7 @@ if df is not None and len(df) > 0:
     # === TAB 3: TRENDS ===
     with tab_trends:
         if metrics.get("Date"):
-            st.markdown('<div class="section-header">📅 Training Volume Over Time</div>', unsafe_allow_html=True)
+            st.markdown('<div class="section-header">Training Volume Over Time</div>', unsafe_allow_html=True)
             df_trend = df.set_index("Date").resample("W").size().reset_index(name="Sessions")
             fig = px.area(df_trend, x="Date", y="Sessions", color_discrete_sequence=["#00BAC7"])
             fig.update_layout(height=300, margin=dict(l=0, r=0, t=10, b=0),
@@ -2304,7 +2414,7 @@ if df is not None and len(df) > 0:
 
         # Country trend over time
         if metrics.get("Date") and metrics.get("Country"):
-            st.markdown('<div class="section-header">🌏 Training Volume by Market</div>', unsafe_allow_html=True)
+            st.markdown('<div class="section-header">Training Volume by Market</div>', unsafe_allow_html=True)
             country_trend = df.groupby([pd.Grouper(key="Date", freq="W"), "Country"]).size().reset_index(name="Sessions")
             fig = px.line(country_trend, x="Date", y="Sessions", color="Country",
                           color_discrete_sequence=["#00BAC7", "#170F4F", "#FFB74D", "#2ecc71", "#e74c3c", "#9b59b6"])
@@ -2315,7 +2425,7 @@ if df is not None and len(df) > 0:
 
         # Pass rate trend
         if metrics.get("Date") and metrics.get("Pass Flag"):
-            st.markdown('<div class="section-header">📊 Pass Rate Trend</div>', unsafe_allow_html=True)
+            st.markdown('<div class="section-header">Pass Rate Trend</div>', unsafe_allow_html=True)
             pass_trend = df.set_index("Date").resample("W")["Pass Flag"].mean().reset_index()
             pass_trend["Pass Rate (%)"] = (pass_trend["Pass Flag"] * 100).round(1)
             fig = px.line(pass_trend, x="Date", y="Pass Rate (%)", color_discrete_sequence=["#00BAC7"])
@@ -2330,11 +2440,11 @@ if df is not None and len(df) > 0:
         data_col1, data_col2 = st.columns([3, 1])
 
         with data_col1:
-            st.markdown('<div class="section-header">📋 Raw Data</div>', unsafe_allow_html=True)
+            st.markdown('<div class="section-header">Raw Data</div>', unsafe_allow_html=True)
             st.dataframe(df, use_container_width=True, height=400)
 
         with data_col2:
-            st.markdown('<div class="section-header">⬇️ Export</div>', unsafe_allow_html=True)
+            st.markdown('<div class="section-header">Export</div>', unsafe_allow_html=True)
             st.download_button("📄 Download CSV", df.to_csv(index=False), "training_data.csv", "text/csv",
                                use_container_width=True)
             buf = BytesIO()
@@ -2345,7 +2455,7 @@ if df is not None and len(df) > 0:
                               use_container_width=True)
 
             st.markdown("---")
-            st.markdown('<div class="section-header">📋 Data Availability</div>', unsafe_allow_html=True)
+            st.markdown('<div class="section-header">Data Availability</div>', unsafe_allow_html=True)
 
             metric_groups = {
                 "Core": ["Date", "Trainer", "Account", "Country", "Store", "Training Name", "Training Type", "Training ID"],
