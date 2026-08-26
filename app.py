@@ -339,6 +339,21 @@ st.markdown("""
         padding-bottom: 8px;
         border-bottom: 1px solid #E5E7EB;
     }
+
+    /* ═══ BREADCRUMB ═══ */
+    .breadcrumb {
+        font-size: 0.7rem;
+        color: #9CA3AF !important;
+        margin: 0 0 2px;
+        letter-spacing: 0.2px;
+    }
+    .breadcrumb span {
+        color: #9CA3AF !important;
+    }
+    .breadcrumb .sep {
+        margin: 0 4px;
+        opacity: 0.5;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -792,6 +807,9 @@ def generate_ai_insights(df, metrics, kpis):
             insights.append(("", f"Attach rate declined by {abs(imp)}pp post-training. Investigate contributing factors."))
 
     if metrics.get("Account") and metrics.get("Pass Flag"):
+        # NOTE: This ranking includes ALL accounts in the current filtered view,
+        # including internal accounts (e.g., "Bolttech Internal") if present in the data.
+        # To exclude internal accounts, add a filter in the sidebar or mark them in the source data.
         acct_pass = df.groupby("Account")["Pass Flag"].mean().sort_values(ascending=False)
         if len(acct_pass) > 1:
             top = acct_pass.index[0]
@@ -1333,8 +1351,7 @@ def render_kpi_card(label, value, delta=None, delta_type="neutral", size="primar
 # Header row with title and data status
 header_col1, header_col2 = st.columns([3, 1])
 with header_col1:
-    st.markdown('<p class="dash-title">Asia Training Dashboard</p>', unsafe_allow_html=True)
-    st.markdown('<p class="dash-subtitle">Executive Training Analytics</p>', unsafe_allow_html=True)
+    pass  # Dynamic title rendered after filters
 
 # === DATA LOADING ===
 MASTER_FILE = r"c:\Users\BenjJavier\OneDrive - bolttech\Documents\Copilot\Created\Asia Training Dashboard v1.xlsx"
@@ -1564,6 +1581,47 @@ if df is not None and len(df) > 0:
     # Recompute after filtering
     metrics = detect_metrics(df)
     kpis = compute_kpis(df, metrics)
+
+    # ─── DYNAMIC TITLE & BREADCRUMB ───
+    COUNTRY_NAMES = {
+        "PH": "Philippines", "MY": "Malaysia", "TH": "Thailand",
+        "VN": "Vietnam", "ID": "Indonesia", "SG": "Singapore",
+        "HK": "Hong Kong", "TW": "Taiwan", "KR": "South Korea",
+        "JP": "Japan", "IN": "India", "BD": "Bangladesh",
+    }
+    # Determine view level
+    _active_market = None
+    _active_account = None
+    try:
+        if sel_countries and sel_countries != "All":
+            _active_market = sel_countries
+    except NameError:
+        pass
+    try:
+        if sel_account and sel_account != "All":
+            _active_account = sel_account
+    except NameError:
+        pass
+
+    if _active_market:
+        market_full = COUNTRY_NAMES.get(_active_market, _active_market)
+        dash_title = f"{market_full} Training Dashboard"
+        dash_subtitle = "Market Training Performance"
+    else:
+        dash_title = "Asia Training Dashboard"
+        dash_subtitle = "Regional Training Performance"
+
+    # Breadcrumb
+    crumbs = ["Asia"]
+    if _active_market:
+        crumbs.append(COUNTRY_NAMES.get(_active_market, _active_market))
+    if _active_account:
+        crumbs.append(_active_account)
+    breadcrumb_html = '<span class="sep">›</span>'.join(f"<span>{c}</span>" for c in crumbs)
+
+    st.markdown(f'<p class="breadcrumb">{breadcrumb_html}</p>', unsafe_allow_html=True)
+    st.markdown(f'<p class="dash-title">{dash_title}</p>', unsafe_allow_html=True)
+    st.markdown(f'<p class="dash-subtitle">{dash_subtitle}</p>', unsafe_allow_html=True)
 
     # ─── COMPACT HEADER CHIPS (replaces hero banner) ───
     # Summary chips: dynamic context about the current view
@@ -1818,7 +1876,7 @@ if df is not None and len(df) > 0:
             with acct_card_cols[i % 3]:
                 acct_name = row["Account"]
                 trainings = int(row["Trainings"])
-                parts = [f"**{acct_name}**", f"📋 {trainings:,} trainings"]
+                parts = [f"<strong style='font-size:0.95rem;'>{acct_name}</strong>", f"📋 {trainings:,} trainings"]
                 if "Frontliners" in row and row["Frontliners"] > 0:
                     parts.append(f"👥 {int(row['Frontliners']):,} frontliners")
                 else:
