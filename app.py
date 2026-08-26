@@ -2039,7 +2039,8 @@ if df is not None and len(df) > 0:
 
     if selected_market and metrics.get("Account") and len(df) > 0 and df["Account"].nunique() > 1:
         st.markdown("---")
-        st.markdown(f'<div class="section-header">{selected_market} — Account Breakdown</div>', unsafe_allow_html=True)
+        _market_full_name = COUNTRY_NAMES.get(selected_market, selected_market)
+        st.markdown(f'<div class="section-header">{_market_full_name} — Account Breakdown</div>', unsafe_allow_html=True)
 
         # Training Name filter for the account breakdown
         breakdown_df = df.copy()
@@ -2603,11 +2604,34 @@ if df is not None and len(df) > 0:
                 t_data["Pass Rate (%)"] = (t_data["pass_rate"] * 100).round(1)
                 t_data = t_data.sort_values("Pass Rate (%)", ascending=False)
 
-                fig = px.bar(t_data, x="Trainer", y="Pass Rate (%)", color="sessions",
-                             color_continuous_scale=[[0, "#e0f7fa"], [0.5, "#00BAC7"], [1, "#006064"]])
-                fig.update_layout(height=350, margin=dict(l=0, r=0, t=10, b=0),
-                                  xaxis_title="", yaxis_title="Pass Rate (%)")
+                # Show top 15 as horizontal bar chart
+                top_trainers = t_data.head(15)
+                fig = go.Figure()
+                fig.add_trace(go.Bar(
+                    y=top_trainers["Trainer"],
+                    x=top_trainers["Pass Rate (%)"],
+                    orientation="h",
+                    marker_color="#0891B2",
+                    text=[f"{r:.0f}% · {s:,} sessions" for r, s in zip(top_trainers["Pass Rate (%)"], top_trainers["sessions"])],
+                    textposition="auto",
+                    textfont=dict(size=10),
+                ))
+                fig.update_layout(
+                    height=max(250, len(top_trainers) * 28),
+                    margin=dict(l=0, r=10, t=5, b=5),
+                    xaxis=dict(title="Pass Rate (%)", range=[0, 105], showgrid=True, gridcolor="#F3F4F6"),
+                    yaxis=dict(title="", autorange="reversed", tickfont=dict(size=11)),
+                    plot_bgcolor="#FFFFFF",
+                )
                 st.plotly_chart(fig, use_container_width=True)
+
+                # Expandable full trainer table
+                if len(t_data) > 15:
+                    with st.expander(f"View all {len(t_data)} trainers"):
+                        st.dataframe(
+                            t_data[["Trainer", "Pass Rate (%)", "sessions"]].rename(columns={"sessions": "Sessions"}),
+                            use_container_width=True, height=300
+                        )
 
         # Attach Rate Comparison
         if metrics.get("Attach Rate Before") and metrics.get("Attach Rate After") and metrics.get("Account"):
@@ -2788,21 +2812,38 @@ if df is not None and len(df) > 0:
     with tab_trends:
         if metrics.get("Date"):
             st.markdown('<div class="section-header">Training Volume Over Time</div>', unsafe_allow_html=True)
-            df_trend = df.set_index("Date").resample("W").size().reset_index(name="Sessions")
-            fig = px.area(df_trend, x="Date", y="Sessions", color_discrete_sequence=["#00BAC7"])
-            fig.update_layout(height=300, margin=dict(l=0, r=0, t=10, b=0),
-                              xaxis_title="", yaxis_title="Sessions per Week")
+            # NOTE: This chart counts ROWS per week (each row = one trainee attendance record),
+            # NOT unique training sessions. The headline "Trainings Done" KPI uses unique
+            # Date+TrainingName+Trainer combos. This discrepancy is documented — the trend
+            # shows participation volume (records), not session count.
+            df_trend = df.set_index("Date").resample("W").size().reset_index(name="Records")
+            fig = px.line(df_trend, x="Date", y="Records", color_discrete_sequence=["#0891B2"])
+            fig.update_traces(line=dict(width=2.5))
+            fig.update_layout(
+                height=260, margin=dict(l=0, r=0, t=5, b=0),
+                xaxis=dict(title="", tickformat="%b %d", showgrid=False),
+                yaxis=dict(title="Records per Week", showgrid=True, gridcolor="#F3F4F6"),
+                plot_bgcolor="#FFFFFF",
+            )
             st.plotly_chart(fig, use_container_width=True)
 
-        # Country trend over time
-        if metrics.get("Date") and metrics.get("Country"):
+        # Country trend over time — small multiples for readability
+        if metrics.get("Date") and metrics.get("Country") and df["Country"].nunique() > 1:
             st.markdown('<div class="section-header">Training Volume by Market</div>', unsafe_allow_html=True)
-            country_trend = df.groupby([pd.Grouper(key="Date", freq="W"), "Country"]).size().reset_index(name="Sessions")
-            fig = px.line(country_trend, x="Date", y="Sessions", color="Country",
-                          color_discrete_sequence=["#00BAC7", "#170F4F", "#FFB74D", "#2ecc71", "#e74c3c", "#9b59b6"])
-            fig.update_layout(height=300, margin=dict(l=0, r=0, t=10, b=0),
-                              xaxis_title="", yaxis_title="Sessions per Week",
-                              legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+            country_trend = df.groupby([pd.Grouper(key="Date", freq="W"), "Country"]).size().reset_index(name="Records")
+            # Map to full names for legend
+            country_trend["Market"] = country_trend["Country"].map(lambda c: COUNTRY_NAMES.get(c, c))
+
+            fig = px.line(country_trend, x="Date", y="Records", color="Market",
+                          color_discrete_sequence=["#0891B2", "#6366F1", "#F59E0B", "#10B981", "#EF4444", "#8B5CF6"])
+            fig.update_traces(line=dict(width=2))
+            fig.update_layout(
+                height=280, margin=dict(l=0, r=0, t=5, b=0),
+                xaxis=dict(title="", tickformat="%b %d", showgrid=False),
+                yaxis=dict(title="Records per Week", showgrid=True, gridcolor="#F3F4F6"),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=11)),
+                plot_bgcolor="#FFFFFF",
+            )
             st.plotly_chart(fig, use_container_width=True)
 
         # Pass rate trend
@@ -2810,10 +2851,15 @@ if df is not None and len(df) > 0:
             st.markdown('<div class="section-header">Pass Rate Trend</div>', unsafe_allow_html=True)
             pass_trend = df.set_index("Date").resample("W")["Pass Flag"].mean().reset_index()
             pass_trend["Pass Rate (%)"] = (pass_trend["Pass Flag"] * 100).round(1)
-            fig = px.line(pass_trend, x="Date", y="Pass Rate (%)", color_discrete_sequence=["#00BAC7"])
-            fig.add_hline(y=80, line_dash="dash", line_color="rgba(46,204,113,0.5)", annotation_text="Target: 80%")
-            fig.update_layout(height=280, margin=dict(l=0, r=0, t=10, b=0),
-                              xaxis_title="", yaxis_title="Pass Rate (%)")
+            fig = px.line(pass_trend, x="Date", y="Pass Rate (%)", color_discrete_sequence=["#0891B2"])
+            fig.update_traces(line=dict(width=2.5))
+            fig.add_hline(y=80, line_dash="dash", line_color="rgba(16,185,129,0.5)", annotation_text="Target: 80%")
+            fig.update_layout(
+                height=250, margin=dict(l=0, r=0, t=5, b=0),
+                xaxis=dict(title="", tickformat="%b %d", showgrid=False),
+                yaxis=dict(title="Pass Rate (%)", range=[0, 105], showgrid=True, gridcolor="#F3F4F6"),
+                plot_bgcolor="#FFFFFF",
+            )
             st.plotly_chart(fig, use_container_width=True)
 
 
