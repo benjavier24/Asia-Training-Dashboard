@@ -346,10 +346,22 @@ st.markdown("""
         width: 0 !important;
         height: 0 !important;
         overflow: hidden !important;
+        display: none !important;
     }
     /* Expander: ensure the toggle still functions but icon text is hidden */
     [data-testid="stExpander"] summary span[data-testid="stExpanderToggleIcon"] {
         display: none !important;
+    }
+    /* Broader: hide any element using Material Symbols font that renders as text */
+    @font-face {
+        font-family: 'Material Symbols Rounded';
+        src: local('Material Symbols Rounded');
+        size-adjust: 0%;
+    }
+    @font-face {
+        font-family: 'Material Symbols Outlined';
+        src: local('Material Symbols Outlined');
+        size-adjust: 0%;
     }
 
     /* ═══ FILTER HEADER IN SIDEBAR ═══ */
