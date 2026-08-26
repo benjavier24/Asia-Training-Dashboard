@@ -327,12 +327,14 @@ st.markdown("""
     [data-testid="stSidebar"] .block-container {
         padding-top: 1rem !important;
     }
-    /* Hide sidebar collapse button text artifact */
-    [data-testid="stSidebarCollapseButton"] {
-        font-size: 0 !important;
-    }
-    [data-testid="stSidebarCollapseButton"] svg {
-        font-size: 1.2rem !important;
+    /* Hide sidebar collapse button text artifact (Material icon fallback text) */
+    [data-testid="stSidebarCollapseButton"],
+    [data-testid="collapsedControl"] {
+        visibility: hidden !important;
+        height: 0 !important;
+        overflow: hidden !important;
+        margin: 0 !important;
+        padding: 0 !important;
     }
 
     /* ═══ FILTER HEADER IN SIDEBAR ═══ */
