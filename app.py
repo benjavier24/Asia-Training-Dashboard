@@ -327,6 +327,13 @@ st.markdown("""
     [data-testid="stSidebar"] .block-container {
         padding-top: 1rem !important;
     }
+    /* Hide sidebar collapse button text artifact */
+    [data-testid="stSidebarCollapseButton"] {
+        font-size: 0 !important;
+    }
+    [data-testid="stSidebarCollapseButton"] svg {
+        font-size: 1.2rem !important;
+    }
 
     /* ═══ FILTER HEADER IN SIDEBAR ═══ */
     .sidebar-title {
@@ -1566,7 +1573,7 @@ def render_kpi_card(label, value, delta=None, delta_type="neutral", size="primar
 # ====== MAIN APP ======
 
 # Header row with title and data status
-header_col1, header_col2 = st.columns([3, 1])
+header_col1, header_col2 = st.columns([2, 1])
 with header_col1:
     pass  # Dynamic title rendered after filters
 
@@ -1664,7 +1671,7 @@ elif st.session_state.data_source == "📎 Upload Excel/CSV":
 
 # Show data status in header
 with header_col2:
-    st.markdown(f"<div style='text-align:right; padding-top:16px; font-size:0.8rem; opacity:0.7; color:inherit;'>{data_status}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div style='text-align:right; padding-top:12px; font-size:0.68rem; color:#6B7280 !important; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;'>{data_status}</div>", unsafe_allow_html=True)
 
 
 # === MAIN CONTENT WITH SIDEBAR FILTERS ===
