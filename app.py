@@ -827,6 +827,35 @@ def detect_metrics(df):
     return metrics
 
 
+def get_unique_sessions(df, metrics):
+    """Return a deduplicated DataFrame with one row per unique training session.
+
+    Session identification priority:
+      1. If Training ID exists → deduplicate by Training ID
+      2. Otherwise → deduplicate by the composite key (Date, Training Name, Trainer)
+         using whichever of those fields are available.
+
+    This matches the same logic used by compute_kpis["Total Sessions"].
+    """
+    if metrics.get("Training ID"):
+        return df.drop_duplicates(subset=["Training ID"])
+
+    # Build composite session key from available fields
+    session_cols = []
+    if metrics.get("Date"):
+        session_cols.append("Date")
+    if metrics.get("Training Name"):
+        session_cols.append("Training Name")
+    if metrics.get("Trainer"):
+        session_cols.append("Trainer")
+
+    if session_cols:
+        return df.drop_duplicates(subset=session_cols)
+
+    # Fallback: no reliable session key — return original (cannot deduplicate safely)
+    return df
+
+
 def compute_kpis(df, metrics):
     """Compute KPIs based on available metrics."""
     kpis = {}
@@ -2839,35 +2868,47 @@ if df is not None and len(df) > 0:
     with tab_trends:
         if metrics.get("Date"):
             st.markdown('<div class="section-header">Training Volume Over Time</div>', unsafe_allow_html=True)
-            # NOTE: This chart counts ROWS per week (each row = one trainee attendance record),
-            # NOT unique training sessions. The headline "Trainings Done" KPI uses unique
-            # Date+TrainingName+Trainer combos. This discrepancy is documented — the trend
-            # shows participation volume (records), not session count.
-            df_trend = df.set_index("Date").resample("W").size().reset_index(name="Records")
-            fig = px.line(df_trend, x="Date", y="Records", color_discrete_sequence=["#0891B2"])
+            # Deduplicate to unique sessions before counting per week
+            df_sessions = get_unique_sessions(df, metrics)
+            df_trend = df_sessions.set_index("Date").resample("W").size().reset_index(name="Sessions")
+            fig = px.line(df_trend, x="Date", y="Sessions", color_discrete_sequence=["#0891B2"])
             fig.update_traces(line=dict(width=2.5))
             fig.update_layout(
                 height=260, margin=dict(l=0, r=0, t=5, b=0),
                 xaxis=dict(title="", tickformat="%b %d", showgrid=False),
-                yaxis=dict(title="Records per Week", showgrid=True, gridcolor="#F3F4F6"),
+                yaxis=dict(title="Sessions per Week", showgrid=True, gridcolor="#F3F4F6"),
                 plot_bgcolor="#FFFFFF",
             )
             st.plotly_chart(fig, use_container_width=True)
 
-        # Country trend over time — small multiples for readability
+        # Country trend over time — unique sessions per market per week
         if metrics.get("Date") and metrics.get("Country") and df["Country"].nunique() > 1:
             st.markdown('<div class="section-header">Training Volume by Market</div>', unsafe_allow_html=True)
-            country_trend = df.groupby([pd.Grouper(key="Date", freq="W"), "Country"]).size().reset_index(name="Records")
+            # Deduplicate sessions within each market (include Country in dedup key)
+            if metrics.get("Training ID"):
+                # Training ID is globally unique, just deduplicate by it
+                df_mkt_sessions = df.drop_duplicates(subset=["Training ID"])
+            else:
+                session_cols = ["Country"]
+                if metrics.get("Date"):
+                    session_cols.append("Date")
+                if metrics.get("Training Name"):
+                    session_cols.append("Training Name")
+                if metrics.get("Trainer"):
+                    session_cols.append("Trainer")
+                df_mkt_sessions = df.drop_duplicates(subset=session_cols)
+
+            country_trend = df_mkt_sessions.groupby([pd.Grouper(key="Date", freq="W"), "Country"]).size().reset_index(name="Sessions")
             # Map to full names for legend
             country_trend["Market"] = country_trend["Country"].map(lambda c: COUNTRY_NAMES.get(c, c))
 
-            fig = px.line(country_trend, x="Date", y="Records", color="Market",
+            fig = px.line(country_trend, x="Date", y="Sessions", color="Market",
                           color_discrete_sequence=["#0891B2", "#6366F1", "#F59E0B", "#10B981", "#EF4444", "#8B5CF6"])
             fig.update_traces(line=dict(width=2))
             fig.update_layout(
                 height=280, margin=dict(l=0, r=0, t=5, b=0),
                 xaxis=dict(title="", tickformat="%b %d", showgrid=False),
-                yaxis=dict(title="Records per Week", showgrid=True, gridcolor="#F3F4F6"),
+                yaxis=dict(title="Sessions per Week", showgrid=True, gridcolor="#F3F4F6"),
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=11)),
                 plot_bgcolor="#FFFFFF",
             )
