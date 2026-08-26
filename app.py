@@ -336,6 +336,21 @@ st.markdown("""
         margin: 0 !important;
         padding: 0 !important;
     }
+    /* Fix Material Symbols icon font fallback — hide text when icons fail to load */
+    .material-symbols-rounded,
+    .material-symbols-outlined,
+    [data-testid="stExpanderToggleIcon"],
+    [data-testid="stFileUploaderDropzoneIcon"] {
+        font-size: 0 !important;
+        visibility: hidden !important;
+        width: 0 !important;
+        height: 0 !important;
+        overflow: hidden !important;
+    }
+    /* Expander: ensure the toggle still functions but icon text is hidden */
+    [data-testid="stExpander"] summary span[data-testid="stExpanderToggleIcon"] {
+        display: none !important;
+    }
 
     /* ═══ FILTER HEADER IN SIDEBAR ═══ */
     .sidebar-title {
