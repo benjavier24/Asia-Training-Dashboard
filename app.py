@@ -2251,15 +2251,10 @@ if df is not None and len(df) > 0:
         attention_items = generate_needs_attention(df, metrics, kpis, _view_level)
         if attention_items:
             st.markdown('<div class="section-header">Needs Attention</div>', unsafe_allow_html=True)
-            items_html = ""
-            for i, (entity, reason, metric_str) in enumerate(attention_items, 1):
-                items_html += f"""
-                <div class="attention-item">
-                    <span class="attention-rank">{i}.</span>
-                    <span class="attention-text">{entity} — {reason}</span>
-                    <span class="attention-metric">{metric_str}</span>
-                </div>
-                """
+            items_html = "".join(
+                f'<div class="attention-item"><span class="attention-rank">{i}.</span><span class="attention-text">{entity} — {reason}</span><span class="attention-metric">{metric_str}</span></div>'
+                for i, (entity, reason, metric_str) in enumerate(attention_items, 1)
+            )
             st.markdown(f'<div class="attention-list">{items_html}</div>', unsafe_allow_html=True)
 
         # Ask the Data section
