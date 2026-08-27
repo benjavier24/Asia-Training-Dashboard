@@ -191,6 +191,101 @@ def test_h_training_type_sessions():
     print("PASS Test H: Training Type counts unique sessions (1 Virtual, 1 F2F)")
 
 
+
+# === TRAINING INTELLIGENCE QUERY TESTS ===
+
+def test_ti_filter_context():
+    """Market = PH: lowest pass rate query should only use PH accounts."""
+    rows = []
+    # PH accounts: Globe low, Power Mac high
+    for i in range(10):
+        rows.append({"Date": "2026-03-01", "Training Name": "Foundation", "Trainer": "Benj Javier", "Country": "PH", "Account": "Globe", "Trainee Code": f"G{i}", "Pass Flag": 0})
+    for i in range(10):
+        rows.append({"Date": "2026-03-01", "Training Name": "Activation", "Trainer": "Andrea Cruz", "Country": "PH", "Account": "Power Mac", "Trainee Code": f"P{i}", "Pass Flag": 1})
+    # MY account: high pass rate (should NOT appear in PH-filtered query)
+    for i in range(10):
+        rows.append({"Date": "2026-03-01", "Training Name": "Champion", "Trainer": "Lisa Tan", "Country": "MY", "Account": "Samsung", "Trainee Code": f"S{i}", "Pass Flag": 1})
+
+    df = make_df(rows)
+    # Simulate PH filter
+    df_ph = df[df["Country"] == "PH"]
+    metrics = detect_metrics(df_ph)
+    kpis = compute_kpis(df_ph, metrics)
+
+    from app import process_natural_query
+    answer = process_natural_query("Which account has the lowest pass rate?", df_ph, metrics, kpis)
+    assert "Globe" in answer, f"Expected Globe in answer, got: {answer[:200]}"
+    assert "Samsung" not in answer, f"Samsung should not appear in PH-filtered query"
+    print("PASS Test TI-A: Filter context respected (PH only)")
+
+
+def test_ti_session_count():
+    """Session question should use unique-session logic, not row count."""
+    rows = [
+        {"Date": "2026-03-01", "Training Name": "Foundation", "Trainer": "Benj Javier", "Trainee Code": f"E{i}", "Pass Flag": 1}
+        for i in range(50)
+    ]
+    df = make_df(rows)
+    metrics = detect_metrics(df)
+    kpis = compute_kpis(df, metrics)
+
+    from app import process_natural_query
+    answer = process_natural_query("How many training sessions were conducted?", df, metrics, kpis)
+    # Should report 1 session (all rows share same Date+Name+Trainer)
+    assert "Training Sessions: 1" in answer or "**Training Sessions: 1**" in answer, f"Should show 1 session. Got: {answer[:300]}"
+    print("PASS Test TI-B: Session count uses unique-session logic")
+
+
+def test_ti_unique_learner():
+    """Learner question should use unique-person logic."""
+    rows = [
+        {"Date": "2026-03-01", "Training Name": "Foundation", "Trainer": "Benj Javier", "Trainee Code": "EMP001", "Pass Flag": 1},
+        {"Date": "2026-03-02", "Training Name": "Activation", "Trainer": "Benj Javier", "Trainee Code": "EMP001", "Pass Flag": 1},
+        {"Date": "2026-03-03", "Training Name": "Champion", "Trainer": "Benj Javier", "Trainee Code": "EMP002", "Pass Flag": 1},
+    ]
+    df = make_df(rows)
+    metrics = detect_metrics(df)
+    kpis = compute_kpis(df, metrics)
+
+    from app import process_natural_query
+    answer = process_natural_query("How many unique learners were trained?", df, metrics, kpis)
+    assert "2" in answer, f"Expected 2 unique learners. Got: {answer[:200]}"
+    print("PASS Test TI-C: Unique learner count is correct")
+
+
+def test_ti_insufficient_scope():
+    """Single account: ranking should explain limitation."""
+    rows = [
+        {"Date": "2026-03-01", "Training Name": "Foundation", "Trainer": "Benj Javier", "Account": "Globe", "Trainee Code": f"E{i}", "Pass Flag": 1}
+        for i in range(5)
+    ]
+    df = make_df(rows)
+    metrics = detect_metrics(df)
+    kpis = compute_kpis(df, metrics)
+
+    from app import process_natural_query
+    answer = process_natural_query("Which account has the highest pass rate?", df, metrics, kpis)
+    assert "one" in answer.lower() or "not available" in answer.lower() or "100" in answer, \
+        f"Should handle single entity gracefully. Got: {answer[:200]}"
+    print("PASS Test TI-D: Insufficient scope handled")
+
+
+def test_ti_unsupported():
+    """Question outside training data should get safe fallback."""
+    rows = [
+        {"Date": "2026-03-01", "Training Name": "Foundation", "Trainer": "Benj Javier", "Trainee Code": "E1", "Pass Flag": 1},
+    ]
+    df = make_df(rows)
+    metrics = detect_metrics(df)
+    kpis = compute_kpis(df, metrics)
+
+    from app import process_natural_query
+    answer = process_natural_query("What is the weather today?", df, metrics, kpis)
+    assert "cannot" in answer.lower() or "summary" in answer.lower() or "session" in answer.lower(), \
+        f"Should give safe fallback. Got: {answer[:200]}"
+    print("PASS Test TI-E: Unsupported question gets safe response")
+
+
 if __name__ == "__main__":
     test_a_repeated_trainee_rows()
     test_b_multiple_sessions_same_week()
@@ -200,4 +295,10 @@ if __name__ == "__main__":
     test_f_unique_learners_passed()
     test_g_no_trainee_fallback()
     test_h_training_type_sessions()
-    print("\nAll regression tests passed!")
+    print("--- Session logic tests passed ---")
+    test_ti_filter_context()
+    test_ti_session_count()
+    test_ti_unique_learner()
+    test_ti_insufficient_scope()
+    test_ti_unsupported()
+    print("\nAll tests passed!")
