@@ -336,15 +336,17 @@ st.markdown("""
         margin: 0 !important;
         padding: 0 !important;
     }
-    /* Fix Material Symbols icon font fallback — hide icon text in expanders */
-    /* The icon renders as text like "arrow_right" before the label.
-       In Streamlit v1.62, the icon is in the same text node as the label,
-       so we cannot CSS-select it separately. Instead, add left padding
-       to push the icon text off-screen and clip it. */
-    [data-testid="stExpander"] details > summary {
-        text-indent: -1.5em;
-        padding-left: 1.5em !important;
-        overflow: hidden;
+    /* Fix Material Symbols icon font fallback */
+    /* Override Material Symbols font to prevent text rendering */
+    @font-face {
+        font-family: 'Material Symbols Rounded';
+        src: url(data:font/woff2;base64,d09GMgABAAAAAA) format('woff2');
+        font-display: block;
+    }
+    @font-face {
+        font-family: 'Material Symbols Outlined';
+        src: url(data:font/woff2;base64,d09GMgABAAAAAA) format('woff2');
+        font-display: block;
     }
     /* File uploader icon */
     [data-testid="stFileUploaderDropzone"] button {
@@ -356,17 +358,6 @@ st.markdown("""
         text-indent: 0;
         display: block;
         font-size: 0.8rem;
-    }
-    /* Override Material Symbols font to prevent text rendering */
-    @font-face {
-        font-family: 'Material Symbols Rounded';
-        src: url(data:font/woff2;base64,d09GMgABAAAAAA) format('woff2');
-        font-display: block;
-    }
-    @font-face {
-        font-family: 'Material Symbols Outlined';
-        src: url(data:font/woff2;base64,d09GMgABAAAAAA) format('woff2');
-        font-display: block;
     }
 
     /* ═══ FILTER HEADER IN SIDEBAR ═══ */
@@ -3191,12 +3182,15 @@ with st.sidebar:
                 st.error(f"Error: {error}")
 
         st.markdown("---")
-        with st.expander("Other options", expanded=False):
+        st.markdown('<div class="sidebar-title">Other Options</div>', unsafe_allow_html=True)
+        if True:  # replaces expander
             if st.button("🎯 Use Demo Data", use_container_width=True):
                 st.session_state.data_source = "🎯 Use Demo Data"
                 st.rerun()
     else:
-        with st.expander("⚙️ Data Source", expanded=False):
+        st.markdown("---")
+        st.markdown('<div class="sidebar-title">Data Source</div>', unsafe_allow_html=True)
+        if True:  # replaces expander
             _options = ["📂 Auto-load Master File", " Upload Excel/CSV", "🎯 Use Demo Data"]
             _current = st.session_state.data_source if st.session_state.data_source in _options else _options[0]
             data_source = st.radio(
@@ -3226,7 +3220,9 @@ with st.sidebar:
                     else:
                         st.error(f"Error: {error}")
 
-    with st.expander("📊 Sales Data (Attach Rate)", expanded=False):
+    st.markdown("---")
+    st.markdown('<div class="sidebar-title">Sales Data (Attach Rate)</div>', unsafe_allow_html=True)
+    if True:  # replaces expander
         import os
         if os.path.exists(SALES_EXPORTS_FOLDER):
             sales_df, sales_status = load_sales_exports(SALES_EXPORTS_FOLDER)
