@@ -336,17 +336,28 @@ st.markdown("""
         margin: 0 !important;
         padding: 0 !important;
     }
-    /* Fix Material Symbols icon font fallback — hide text when icons fail to load */
-    /* Nuclear option: make any text using Material Symbols fonts invisible */
-    * {
-        --ms-font: 'Material Symbols Rounded', 'Material Symbols Outlined';
+    /* Fix Material Symbols icon font fallback — hide icon text in expanders */
+    /* The icon renders as text like "arrow_right" before the label.
+       In Streamlit v1.62, the icon is in the same text node as the label,
+       so we cannot CSS-select it separately. Instead, add left padding
+       to push the icon text off-screen and clip it. */
+    [data-testid="stExpander"] details > summary {
+        text-indent: -1.5em;
+        padding-left: 1.5em !important;
+        overflow: hidden;
     }
-    [class*="material-symbols"],
-    [style*="Material Symbols"] {
-        color: transparent !important;
-        font-size: 0 !important;
+    /* File uploader icon */
+    [data-testid="stFileUploaderDropzone"] button {
+        text-indent: -999px;
+        overflow: hidden;
     }
-    /* Override the font declarations to use empty data URIs */
+    [data-testid="stFileUploaderDropzone"] button::after {
+        content: "Upload";
+        text-indent: 0;
+        display: block;
+        font-size: 0.8rem;
+    }
+    /* Override Material Symbols font to prevent text rendering */
     @font-face {
         font-family: 'Material Symbols Rounded';
         src: url(data:font/woff2;base64,d09GMgABAAAAAA) format('woff2');
@@ -356,18 +367,6 @@ st.markdown("""
         font-family: 'Material Symbols Outlined';
         src: url(data:font/woff2;base64,d09GMgABAAAAAA) format('woff2');
         font-display: block;
-    }
-    /* Expander: force-hide icon text that bleeds into label */
-    [data-testid="stExpander"] details > summary > span:first-child {
-        font-size: 0 !important;
-        width: 0 !important;
-        overflow: hidden !important;
-        display: inline-block !important;
-        max-width: 0 !important;
-    }
-    /* File uploader icon */
-    [data-testid="stFileUploaderDropzone"] button span:first-child {
-        display: none !important;
     }
 
     /* ═══ FILTER HEADER IN SIDEBAR ═══ */
