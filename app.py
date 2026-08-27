@@ -337,31 +337,36 @@ st.markdown("""
         padding: 0 !important;
     }
     /* Fix Material Symbols icon font fallback — hide text when icons fail to load */
-    .material-symbols-rounded,
-    .material-symbols-outlined,
-    [data-testid="stExpanderToggleIcon"],
-    [data-testid="stFileUploaderDropzoneIcon"] {
+    /* Target the icon spans directly by their content pattern */
+    [data-testid="stFileUploaderDropzone"] button span:first-child,
+    [data-testid="stExpander"] details summary svg + span,
+    [data-testid="stExpander"] summary [data-testid="stExpanderToggleIcon"] {
+        display: none !important;
+    }
+    /* Hide icon text in file uploader button */
+    [data-testid="stFileUploaderDropzone"] button {
         font-size: 0 !important;
-        visibility: hidden !important;
-        width: 0 !important;
-        height: 0 !important;
-        overflow: hidden !important;
-        display: none !important;
     }
-    /* Expander: ensure the toggle still functions but icon text is hidden */
-    [data-testid="stExpander"] summary span[data-testid="stExpanderToggleIcon"] {
-        display: none !important;
+    [data-testid="stFileUploaderDropzone"] button span {
+        font-size: 0.8rem !important;
     }
-    /* Broader: hide any element using Material Symbols font that renders as text */
+    /* Expander: hide the arrow icon text, keep the label */
+    [data-testid="stExpander"] summary {
+        list-style: none;
+    }
+    [data-testid="stExpander"] summary::-webkit-details-marker {
+        display: none;
+    }
+    /* Override Material Symbols font rendering */
     @font-face {
         font-family: 'Material Symbols Rounded';
-        src: local('Material Symbols Rounded');
-        size-adjust: 0%;
+        src: url(data:font/woff2;base64,) format('woff2');
+        font-display: block;
     }
     @font-face {
         font-family: 'Material Symbols Outlined';
-        src: local('Material Symbols Outlined');
-        size-adjust: 0%;
+        src: url(data:font/woff2;base64,) format('woff2');
+        font-display: block;
     }
 
     /* ═══ FILTER HEADER IN SIDEBAR ═══ */
