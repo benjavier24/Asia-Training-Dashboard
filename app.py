@@ -337,36 +337,37 @@ st.markdown("""
         padding: 0 !important;
     }
     /* Fix Material Symbols icon font fallback — hide text when icons fail to load */
-    /* Target the icon spans directly by their content pattern */
-    [data-testid="stFileUploaderDropzone"] button span:first-child,
-    [data-testid="stExpander"] details summary svg + span,
-    [data-testid="stExpander"] summary [data-testid="stExpanderToggleIcon"] {
-        display: none !important;
+    /* Nuclear option: make any text using Material Symbols fonts invisible */
+    * {
+        --ms-font: 'Material Symbols Rounded', 'Material Symbols Outlined';
     }
-    /* Hide icon text in file uploader button */
-    [data-testid="stFileUploaderDropzone"] button {
+    [class*="material-symbols"],
+    [style*="Material Symbols"] {
+        color: transparent !important;
         font-size: 0 !important;
     }
-    [data-testid="stFileUploaderDropzone"] button span {
-        font-size: 0.8rem !important;
-    }
-    /* Expander: hide the arrow icon text, keep the label */
-    [data-testid="stExpander"] summary {
-        list-style: none;
-    }
-    [data-testid="stExpander"] summary::-webkit-details-marker {
-        display: none;
-    }
-    /* Override Material Symbols font rendering */
+    /* Override the font declarations to use empty data URIs */
     @font-face {
         font-family: 'Material Symbols Rounded';
-        src: url(data:font/woff2;base64,) format('woff2');
+        src: url(data:font/woff2;base64,d09GMgABAAAAAA) format('woff2');
         font-display: block;
     }
     @font-face {
         font-family: 'Material Symbols Outlined';
-        src: url(data:font/woff2;base64,) format('woff2');
+        src: url(data:font/woff2;base64,d09GMgABAAAAAA) format('woff2');
         font-display: block;
+    }
+    /* Expander: force-hide icon text that bleeds into label */
+    [data-testid="stExpander"] details > summary > span:first-child {
+        font-size: 0 !important;
+        width: 0 !important;
+        overflow: hidden !important;
+        display: inline-block !important;
+        max-width: 0 !important;
+    }
+    /* File uploader icon */
+    [data-testid="stFileUploaderDropzone"] button span:first-child {
+        display: none !important;
     }
 
     /* ═══ FILTER HEADER IN SIDEBAR ═══ */
