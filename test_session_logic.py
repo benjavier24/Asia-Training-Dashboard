@@ -344,6 +344,102 @@ def test_p4_context_in_answer():
     print("PASS Test P4-C: Answer includes context line")
 
 
+# === PHASE 4.1: TRUST & TRACEABILITY TESTS ===
+
+def _ti_result(question, df):
+    """Helper: run the structured Training Intelligence engine."""
+    from app import run_training_intelligence
+    metrics = detect_metrics(df)
+    kpis = compute_kpis(df, metrics)
+    return run_training_intelligence(question, df, metrics, kpis)
+
+
+def test_p41_based_on_metadata():
+    """Lowest pass rate market query should set metric=Pass Rate, dimension=Market."""
+    rows = []
+    for country, pf in [("PH", 1), ("MY", 0), ("TH", 1)]:
+        for i in range(5):
+            rows.append({"Date": "2026-03-01", "Training Name": f"P{country}", "Trainer": f"T{country}",
+                         "Country": country, "Pass Flag": pf})
+    df = make_df(rows)
+    result = _ti_result("Which market has the lowest pass rate?", df)
+    assert result["metric"] == "Pass Rate", f"Expected metric=Pass Rate, got {result['metric']}"
+    assert result["dimension"] == "Market", f"Expected dimension=Market, got {result['dimension']}"
+    print("PASS Test P4.1-A: Based-on metadata (metric + dimension)")
+
+
+def test_p41_supporting_data_scope():
+    """PH-filtered account query supporting table contains PH accounts only."""
+    rows = []
+    for i in range(5):
+        rows.append({"Date": "2026-03-01", "Training Name": "Foundation", "Trainer": "Benj Javier", "Country": "PH", "Account": "Globe", "Pass Flag": 0})
+    for i in range(5):
+        rows.append({"Date": "2026-03-01", "Training Name": "Activation", "Trainer": "Andrea Cruz", "Country": "PH", "Account": "Power Mac", "Pass Flag": 1})
+    for i in range(5):
+        rows.append({"Date": "2026-03-01", "Training Name": "Champion", "Trainer": "Lisa Tan", "Country": "MY", "Account": "Samsung", "Pass Flag": 1})
+    df = make_df(rows)
+    df_ph = df[df["Country"] == "PH"]
+    result = _ti_result("Which account has the lowest pass rate?", df_ph)
+    table = result["supporting_table"] or []
+    names = [str(r) for r in table]
+    combined = " ".join(names)
+    assert "Samsung" not in combined, f"Samsung (MY) should not appear in PH supporting data"
+    print("PASS Test P4.1-B: Supporting data respects PH scope")
+
+
+def test_p41_calc_description():
+    """Session question should include the unique-session calc description."""
+    rows = [
+        {"Date": "2026-03-01", "Training Name": "Foundation", "Trainer": "Benj Javier", "Trainee Code": f"E{i}", "Pass Flag": 1}
+        for i in range(10)
+    ]
+    df = make_df(rows)
+    result = _ti_result("How many training sessions?", df)
+    assert result["calc_desc"] and "unique training sessions" in result["calc_desc"].lower(), \
+        f"Expected unique-session calc desc, got {result['calc_desc']}"
+    print("PASS Test P4.1-C: Calculation description present")
+
+
+def test_p41_limited_data_status():
+    """Comparison with a market missing scores flags Limited data."""
+    rows = []
+    for i in range(5):
+        rows.append({"Date": "2026-03-01", "Training Name": "Foundation", "Trainer": "Benj Javier", "Country": "PH", "Assessment Score": 0.9, "Pass Flag": 1})
+    for i in range(5):
+        rows.append({"Date": "2026-03-01", "Training Name": "Champion", "Trainer": "Lisa Tan", "Country": "SG", "Assessment Score": None, "Pass Flag": 1})
+    df = make_df(rows)
+    result = _ti_result("Compare markets", df)
+    assert result["data_quality"] == "Limited data", f"Expected Limited data, got {result['data_quality']}"
+    print("PASS Test P4.1-D: Limited data status for missing scores")
+
+
+def test_p41_ranking_basis():
+    """Ranking metadata explicitly identifies the ranking metric."""
+    rows = []
+    for country, pf in [("PH", 1), ("MY", 0), ("TH", 1)]:
+        for i in range(5):
+            rows.append({"Date": "2026-03-01", "Training Name": f"P{country}", "Trainer": f"T{country}",
+                         "Country": country, "Pass Flag": pf})
+    df = make_df(rows)
+    result = _ti_result("Top markets by pass rate", df)
+    assert result["metric"] == "Pass Rate", f"Ranking metric should be Pass Rate, got {result['metric']}"
+    assert result["supporting_table"] is not None, "Ranking should have a supporting table"
+    print("PASS Test P4.1-E: Ranking basis is traceable")
+
+
+def test_p41_no_fake_confidence():
+    """Response must not contain fake AI confidence scores."""
+    rows = [
+        {"Date": "2026-03-01", "Training Name": "Foundation", "Trainer": "Benj Javier", "Country": "PH", "Pass Flag": 1}
+    ]
+    df = make_df(rows)
+    result = _ti_result("Summarize performance", df)
+    combined = (result["answer"] + str(result.get("data_quality", ""))).lower()
+    assert "confidence" not in combined, "Should not contain confidence scores"
+    assert "%" not in str(result.get("data_quality", "")), "Data quality should not be a percentage"
+    print("PASS Test P4.1-F: No fake confidence scores")
+
+
 def _run_all_tests():
     test_a_repeated_trainee_rows()
     test_b_multiple_sessions_same_week()
@@ -363,6 +459,13 @@ def _run_all_tests():
     test_p4_missing_score_no_nan()
     test_p4_comparison_is_table()
     test_p4_context_in_answer()
+    print("--- Phase 4 cleanup tests passed ---")
+    test_p41_based_on_metadata()
+    test_p41_supporting_data_scope()
+    test_p41_calc_description()
+    test_p41_limited_data_status()
+    test_p41_ranking_basis()
+    test_p41_no_fake_confidence()
     print("\nAll tests passed!")
 
 

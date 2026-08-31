@@ -1125,11 +1125,20 @@ def generate_ai_insights(df, metrics, kpis):
 
 
 def process_natural_query(question, df, metrics, kpis):
+    """Backward-compatible wrapper: returns just the answer text string.
+    Use run_training_intelligence() for the full structured result.
+    """
+    result = run_training_intelligence(question, df, metrics, kpis)
+    return result["answer"]
+
+
+def run_training_intelligence(question, df, metrics, kpis):
     """Training Intelligence query engine.
 
-    Pipeline: question → intent detection → deterministic calculation → structured response.
+    Pipeline: question → intent detection → deterministic calculation → structured result.
     All calculations use the already-filtered df (respects active dashboard filters).
     Uses standardized metric vocabulary: Training Sessions, Unique Learners, etc.
+    Returns a structured dict with answer text + traceability metadata.
     """
     q = question.strip().lower()
 
@@ -1177,12 +1186,23 @@ def process_natural_query(question, df, metrics, kpis):
         return None  # Cannot determine unique learners
 
     def detect_entity(q_str, dim_col):
-        """Find if the user mentioned a specific value from a dimension."""
+        """Find if the user mentioned a specific value from a dimension.
+        Uses word-boundary matching to avoid false positives (e.g. 'TH' inside 'the').
+        Short codes (<= 3 chars) require an exact word match; longer names allow substring.
+        """
+        import re as _re
         if dim_col not in df.columns:
             return None
         for val in df[dim_col].dropna().unique():
-            if str(val).lower() in q_str:
-                return str(val)
+            val_str = str(val)
+            val_lower = val_str.lower()
+            if len(val_lower) <= 3:
+                # Short codes: require whole-word match
+                if _re.search(r"\b" + _re.escape(val_lower) + r"\b", q_str):
+                    return val_str
+            else:
+                if val_lower in q_str:
+                    return val_str
         return None
 
     # === ENTITY DETECTION & SUBSET ===
@@ -1236,9 +1256,34 @@ def process_natural_query(question, df, metrics, kpis):
     supporting = []
     follow_ups = []
 
+    # Metadata for traceability (Phase 4.1)
+    meta = {
+        "metric": None,          # e.g. "Pass Rate"
+        "dimension": None,       # e.g. "Market", "Account"
+        "aggregation": None,     # plain-language aggregation
+        "calc_desc": None,       # how this was calculated
+        "supporting_table": None,  # list of dicts for a compact table
+        "data_quality": "Based on current filtered data",
+        "sample_note": None,     # e.g. "6 Markets · 362 Training Sessions"
+        "why": None,             # short "why this answer" note
+    }
+
+    # Calculation descriptions (user-facing, no code/internals)
+    CALC_DESCRIPTIONS = {
+        "Pass Rate": "Percentage of valid passing assessment records within the selected scope.",
+        "Training Sessions": "Count of unique training sessions using Training ID when available, otherwise the approved session key (Country + Date + Training Name + Trainer).",
+        "Unique Learners": "Count of distinct trainee identifiers within the selected scope.",
+        "Learner Attendances": "Total attendance records (one row per learner per session) in the selected scope.",
+        "Stores Reached": "Count of unique stores in the selected data.",
+        "Average Assessment Score": "Average of valid assessment scores within the selected scope.",
+        "Attach Rate": "Average attach rate before and after training, measured 30 days post-training.",
+    }
+
     # --- NEEDS ATTENTION ---
     if is_attention:
         answer_parts.append("**Entities requiring attention** (below-average pass rate):")
+        meta["metric"] = "Pass Rate"
+        meta["calc_desc"] = CALC_DESCRIPTIONS["Pass Rate"]
         if "Pass Flag" in subset.columns:
             avg_rate = subset["Pass Flag"].mean() * 100
             # Determine grouping dimension
@@ -1251,20 +1296,30 @@ def process_natural_query(question, df, metrics, kpis):
             else:
                 dim = None
 
+            meta["dimension"] = "Market" if dim == "Country" else dim
             if dim:
                 rates = subset.groupby(dim)["Pass Flag"].mean().sort_values() * 100
                 below_avg = rates[rates < avg_rate]
                 if len(below_avg) > 0:
+                    table = []
                     for entity, rate in below_avg.head(5).items():
                         gap = round(avg_rate - rate, 1)
                         answer_parts.append(f"• {entity} — {rate:.1f}% ({gap} pts below avg)")
+                        table.append({meta["dimension"] or dim: entity, "Pass Rate": f"{rate:.1f}%",
+                                      "Scope Avg": f"{avg_rate:.1f}%", "Gap": f"{gap} pts"})
                     supporting.append(f"Scope average: {avg_rate:.1f}%")
+                    meta["supporting_table"] = table
+                    worst_name = below_avg.index[0]
+                    meta["why"] = f"{worst_name} was flagged because it has the lowest Pass Rate among the {subset[dim].nunique()} {(meta['dimension'] or dim).lower()}s currently in scope."
                 else:
                     answer_parts.append("All entities are at or above average.")
+                    meta["data_quality"] = "No comparison available"
             else:
                 answer_parts.append(f"Current pass rate: {avg_rate:.1f}%. Only one entity in scope — comparison not available.")
+                meta["data_quality"] = "No comparison available"
         else:
             answer_parts.append("Pass rate data not available.")
+            meta["data_quality"] = "No valid data"
         follow_ups = ["Compare by pass rate", "Show lowest-performing programs", "Summarize performance"]
 
     # --- SUMMARY ---
@@ -1290,6 +1345,9 @@ def process_natural_query(question, df, metrics, kpis):
                 avg = scores.mean()
                 avg = avg * 100 if avg <= 1 else avg
                 answer_parts.append(f"• Avg Assessment Score: {avg:.1f}%")
+        meta["metric"] = "Multiple"
+        meta["aggregation"] = "Summary of key metrics for the selected scope"
+        meta["sample_note"] = f"{sessions:,} Training Sessions" + (f" · {learners:,} Unique Learners" if learners else "")
         follow_ups = ["Which accounts need attention?", "Compare training methods", "Top trainers by sessions"]
 
     # --- TREND ---
@@ -1297,6 +1355,9 @@ def process_natural_query(question, df, metrics, kpis):
         if "Date" in subset.columns:
             sessions_df = get_unique_sessions(subset, detect_metrics(subset))
             weekly = sessions_df.set_index("Date").resample("W").size()
+            meta["metric"] = "Training Sessions"
+            meta["aggregation"] = "Weekly unique Training Sessions"
+            meta["calc_desc"] = CALC_DESCRIPTIONS["Training Sessions"]
             if len(weekly) > 1:
                 first_half = weekly.iloc[:len(weekly)//2].mean()
                 second_half = weekly.iloc[len(weekly)//2:].mean()
@@ -1308,10 +1369,13 @@ def process_natural_query(question, df, metrics, kpis):
                 answer_parts.append(f"• Change: {'+' if change > 0 else ''}{change:.1f} sessions/week")
                 supporting.append(f"Total sessions: {weekly.sum():,}")
                 supporting.append(f"Period: {subset['Date'].min().strftime('%b %d')} – {subset['Date'].max().strftime('%b %d, %Y')}")
+                meta["sample_note"] = f"{weekly.sum():,} Training Sessions over {len(weekly)} weeks"
             else:
                 answer_parts.append("Insufficient date range for trend analysis.")
+                meta["data_quality"] = "Limited data"
         else:
             answer_parts.append("Date information not available for trend analysis.")
+            meta["data_quality"] = "No valid data"
         follow_ups = ["Show pass rate trend", "Compare markets over time", "Summarize performance"]
 
     # --- RANKING ---
@@ -1333,20 +1397,29 @@ def process_natural_query(question, df, metrics, kpis):
             else:
                 dim = None
 
+            meta["metric"] = "Pass Rate"
+            meta["dimension"] = "Market" if dim == "Country" else dim
+            meta["calc_desc"] = CALC_DESCRIPTIONS["Pass Rate"]
+            meta["aggregation"] = f"Entities ranked by Pass Rate ({'ascending' if is_bottom else 'descending'})"
             if dim and subset[dim].nunique() >= 2:
                 grouped = subset.groupby(dim)["Pass Flag"].agg(["mean", "count"]).reset_index()
                 grouped["rate"] = (grouped["mean"] * 100).round(1)
                 grouped = grouped.sort_values("rate", ascending=is_bottom).head(n)
                 label = "Lowest" if is_bottom else "Top"
-                answer_parts.append(f"**{label} {min(n, len(grouped))} by Pass Rate ({dim}):**")
+                answer_parts.append(f"**{label} {min(n, len(grouped))} by Pass Rate ({meta['dimension']}):**")
+                table = []
                 for i, (_, row) in enumerate(grouped.iterrows(), 1):
                     sessions = get_unique_session_count(subset[subset[dim] == row[dim]])
                     answer_parts.append(f"{i}. {row[dim]} — {row['rate']}% · {sessions} sessions")
+                    table.append({"Rank": i, meta["dimension"]: row[dim], "Pass Rate": f"{row['rate']}%", "Sessions": sessions})
+                meta["supporting_table"] = table
             elif dim and subset[dim].nunique() == 1:
                 answer_parts.append(f"Only one {dim.lower()} in scope — ranking not available.")
+                meta["data_quality"] = "No comparison available"
             else:
                 rate = subset["Pass Flag"].mean() * 100
                 answer_parts.append(f"Pass Rate: {rate:.1f}%")
+                meta["data_quality"] = "No comparison available"
 
         elif is_score and "Assessment Score" in subset.columns:
             dim = "Account" if "Account" in subset.columns and subset["Account"].nunique() > 1 else \
@@ -1388,8 +1461,12 @@ def process_natural_query(question, df, metrics, kpis):
 
         if dim:
             dim_label = "Market" if dim == "Country" else dim
+            meta["dimension"] = dim_label
+            meta["metric"] = "Pass Rate, Avg Score, Sessions, Learners"
+            meta["aggregation"] = f"Metrics compared across each {dim_label.lower()} in scope"
             answer_parts.append(f"**Comparison by {dim_label}:**")
             comp_rows = []
+            has_missing = False
             for entity in subset[dim].dropna().unique():
                 entity_df = subset[subset[dim] == entity]
                 row_data = {"name": entity, "sessions": get_unique_session_count(entity_df)}
@@ -1400,6 +1477,10 @@ def process_natural_query(question, df, metrics, kpis):
                     if len(scores) > 0:
                         avg = scores.mean()
                         row_data["avg_score"] = round((avg * 100 if avg <= 1 else avg), 1)
+                    else:
+                        has_missing = True
+                else:
+                    has_missing = True
                 learners = get_unique_learner_count(entity_df)
                 if learners:
                     row_data["learners"] = learners
@@ -1412,13 +1493,25 @@ def process_natural_query(question, df, metrics, kpis):
             sep = "| --- | ---: | ---: | ---: | ---: |"
             answer_parts.append(header)
             answer_parts.append(sep)
+            table = []
             for r in comp_rows:
                 pass_str = f"{r['pass_rate']}%" if "pass_rate" in r else "No data"
                 score_str = f"{r['avg_score']}%" if "avg_score" in r else "No data"
                 learner_str = f"{r['learners']:,}" if "learners" in r else "No data"
                 answer_parts.append(f"| {r['name']} | {r['sessions']:,} | {pass_str} | {score_str} | {learner_str} |")
+                table.append({dim_label: r["name"], "Sessions": r["sessions"], "Pass Rate": pass_str,
+                              "Avg Score": score_str, "Learners": learner_str})
+            meta["supporting_table"] = table
+            if has_missing:
+                meta["data_quality"] = "Limited data"
+                # Note which entities lack score data
+                missing_entities = [r["name"] for r in comp_rows if "avg_score" not in r]
+                if missing_entities:
+                    answer_parts.append("")
+                    answer_parts.append(f"**Limited data:** {', '.join(missing_entities)} — no valid Average Assessment Score records in the selected period.")
         else:
             answer_parts.append("Only one entity in scope — comparison not available. Try broadening your filters.")
+            meta["data_quality"] = "No comparison available"
         follow_ups = ["Which needs attention?", "Top performers", "Show trend"]
 
     # --- PASS RATE ---
@@ -1430,6 +1523,9 @@ def process_natural_query(question, df, metrics, kpis):
         if "Trainee Code" in subset.columns:
             learners_passed = subset[subset["Pass Flag"] == 1]["Trainee Code"].nunique()
 
+        meta["metric"] = "Pass Rate"
+        meta["calc_desc"] = CALC_DESCRIPTIONS["Pass Rate"]
+        meta["sample_note"] = f"{total:,} assessed records"
         answer_parts.append(f"**Pass Rate: {rate:.1f}%**")
         if learners_passed:
             answer_parts.append(f"{learners_passed:,} unique learners passed out of {get_unique_learner_count(subset):,}.")
@@ -1451,13 +1547,20 @@ def process_natural_query(question, df, metrics, kpis):
     # --- SESSIONS / TRAINING COUNT ---
     elif is_session or (is_count and any(w in q for w in ["session", "training"])):
         sessions = get_unique_session_count(subset)
+        meta["metric"] = "Training Sessions"
+        meta["calc_desc"] = CALC_DESCRIPTIONS["Training Sessions"]
+        meta["sample_note"] = f"{sessions:,} Training Sessions"
         answer_parts.append(f"**Training Sessions: {sessions:,}**")
         answer_parts.append("(Unique sessions based on Date + Training Name + Trainer)")
         if "Country" in subset.columns and subset["Country"].nunique() > 1:
             supporting.append("By Market:")
+            table = []
             for mkt in subset["Country"].dropna().unique():
                 mkt_df = subset[subset["Country"] == mkt]
-                supporting.append(f"  {mkt}: {get_unique_session_count(mkt_df):,}")
+                cnt = get_unique_session_count(mkt_df)
+                supporting.append(f"  {mkt}: {cnt:,}")
+                table.append({"Market": mkt, "Training Sessions": cnt})
+            meta["supporting_table"] = table
         follow_ups = ["Show training volume trend", "Compare markets", "How many unique learners?"]
 
     # --- UNIQUE LEARNERS ---
@@ -1466,20 +1569,31 @@ def process_natural_query(question, df, metrics, kpis):
         if learners:
             answer_parts.append(f"**Unique Learners: {learners:,}**")
             answer_parts.append(f"Total learner attendances: {len(subset):,}")
+            meta["metric"] = "Unique Learners"
+            meta["calc_desc"] = CALC_DESCRIPTIONS["Unique Learners"]
+            meta["sample_note"] = f"{learners:,} Unique Learners"
         else:
             answer_parts.append(f"**Learner Attendances: {len(subset):,}**")
             answer_parts.append("(Unique learner count unavailable — no trainee identifier in data)")
+            meta["metric"] = "Learner Attendances"
+            meta["calc_desc"] = CALC_DESCRIPTIONS["Learner Attendances"]
+            meta["data_quality"] = "Limited data"
         follow_ups = ["Show pass rate", "How many sessions?", "Which stores were reached?"]
 
     # --- STORES ---
     elif is_store and "Store" in subset.columns:
         stores = subset["Store"].nunique()
+        meta["metric"] = "Stores Reached"
+        meta["calc_desc"] = CALC_DESCRIPTIONS["Stores Reached"]
+        meta["sample_note"] = f"{stores:,} Stores Reached"
         answer_parts.append(f"**Stores Reached: {stores:,}**")
         follow_ups = ["Show store performance", "Which stores need attention?", "Summarize"]
 
     # --- ASSESSMENT SCORE ---
     elif is_score and "Assessment Score" in subset.columns:
         scores = subset["Assessment Score"].dropna()
+        meta["metric"] = "Average Assessment Score"
+        meta["calc_desc"] = CALC_DESCRIPTIONS["Average Assessment Score"]
         if len(scores) > 0:
             avg = scores.mean()
             avg = avg * 100 if avg <= 1 else avg
@@ -1487,8 +1601,10 @@ def process_natural_query(question, df, metrics, kpis):
             answer_parts.append(f"**Avg Assessment Score: {avg:.1f}%**")
             supporting.append(f"Min: {scores_pct.min():.0f}% · Max: {scores_pct.max():.0f}% · Median: {scores_pct.median():.0f}%")
             supporting.append(f"Assessed: {len(scores):,} records")
+            meta["sample_note"] = f"{len(scores):,} assessed records"
         else:
             answer_parts.append("No assessment score data available in scope.")
+            meta["data_quality"] = "No valid data"
         follow_ups = ["Which accounts have lowest scores?", "Show pass rate", "Compare programs"]
 
     # --- ATTACH RATE ---
@@ -1629,7 +1745,32 @@ def process_natural_query(question, df, metrics, kpis):
         response.append("")
         response.append("**Suggested follow-ups:** " + " · ".join(f"_{fq}_" for fq in follow_ups[:3]))
 
-    return "\n".join(response)
+    answer_text = "\n".join(response)
+
+    # Build "Based On" summary from metadata
+    based_on_parts = []
+    if meta["metric"]:
+        based_on_parts.append(meta["metric"])
+    if meta["dimension"]:
+        based_on_parts.append(meta["dimension"])
+    based_on_parts.append(context_str)
+    based_on = " · ".join(based_on_parts)
+
+    return {
+        "question": question,
+        "answer": answer_text,
+        "context": context_str,
+        "based_on": based_on,
+        "metric": meta["metric"],
+        "dimension": meta["dimension"],
+        "aggregation": meta["aggregation"],
+        "calc_desc": meta["calc_desc"],
+        "supporting_table": meta["supporting_table"],
+        "data_quality": meta["data_quality"],
+        "sample_note": meta["sample_note"],
+        "why": meta["why"],
+        "follow_ups": follow_ups[:3],
+    }
 
 
 def generate_sample_data():
@@ -2503,27 +2644,78 @@ if df is not None and len(df) > 0:
             st.session_state.ask_history = []
 
         # Display chat history (newest first) with original context tag
+        # Data quality status badge colors
+        _dq_colors = {
+            "Based on current filtered data": "#10B981",
+            "Limited data": "#F59E0B",
+            "No comparison available": "#6366F1",
+            "No valid data": "#EF4444",
+        }
+
         rerun_target = None
         for hist_idx, entry in enumerate(reversed(st.session_state.ask_history)):
             real_idx = len(st.session_state.ask_history) - 1 - hist_idx
             orig_ctx = entry.get("context", "")
             is_historical = orig_ctx and orig_ctx != current_ctx
+
             st.markdown(f"**Q:** {entry['question']}")
+
+            # Historical context tag
             if orig_ctx:
                 tag = " · Historical result" if is_historical else ""
                 st.markdown(
                     f'<div style="font-size:0.68rem;color:#9CA3AF;margin-bottom:4px;">Asked under: {orig_ctx}{tag}</div>',
                     unsafe_allow_html=True
                 )
+
+            # Answer text
             st.markdown(entry["answer"])
+
+            # Based On + Data Quality
+            based_on = entry.get("based_on")
+            dq = entry.get("data_quality", "Based on current filtered data")
+            if based_on:
+                dq_color = _dq_colors.get(dq, "#9CA3AF")
+                st.markdown(
+                    f'<div style="font-size:0.68rem;color:#6B7280;margin-top:2px;">Based on: {based_on}</div>'
+                    f'<div style="font-size:0.62rem;margin-top:2px;"><span style="background:{dq_color}22;color:{dq_color};padding:1px 6px;border-radius:100px;font-weight:600;">{dq}</span></div>',
+                    unsafe_allow_html=True
+                )
+
+            # Why this answer?
+            if entry.get("why"):
+                with st.expander("Why this answer?"):
+                    st.markdown(entry["why"])
+
+            # Supporting data
+            if entry.get("supporting_table"):
+                with st.expander("View supporting data"):
+                    st.dataframe(pd.DataFrame(entry["supporting_table"]), use_container_width=True, hide_index=True)
+
+            # How this was calculated
+            if entry.get("calc_desc"):
+                with st.expander("How this was calculated"):
+                    st.markdown(entry["calc_desc"])
+                    if entry.get("aggregation"):
+                        st.markdown(f"**Aggregation:** {entry['aggregation']}")
+
+            # Current filters changed cue + rerun
             if is_historical:
+                st.markdown(
+                    '<div style="font-size:0.65rem;color:#9CA3AF;font-style:italic;">Dashboard filters have changed since this answer was generated.</div>',
+                    unsafe_allow_html=True
+                )
                 if st.button("Rerun with current filters", key=f"rerun_{real_idx}", use_container_width=False):
                     rerun_target = entry["question"]
             st.markdown("---")
 
+        def _store_ti(question_text):
+            """Run TI and store the full structured result in history."""
+            result = run_training_intelligence(question_text, df, metrics, kpis)
+            st.session_state.ask_history.append(result)
+
         if rerun_target:
-            answer = process_natural_query(rerun_target, df, metrics, kpis)
-            st.session_state.ask_history.append({"question": rerun_target, "answer": answer, "context": current_ctx})
+            _store_ti(rerun_target)
             st.rerun()
 
         # Input
@@ -2540,8 +2732,7 @@ if df is not None and len(df) > 0:
                 st.rerun()
 
         if ask_btn and user_question:
-            answer = process_natural_query(user_question, df, metrics, kpis)
-            st.session_state.ask_history.append({"question": user_question, "answer": answer, "context": current_ctx})
+            _store_ti(user_question)
             st.rerun()
 
         # Context-aware quick prompts
@@ -2551,86 +2742,71 @@ if df is not None and len(df) > 0:
             qp_col1, qp_col2, qp_col3 = st.columns(3)
             with qp_col1:
                 if st.button("Which markets need attention?", use_container_width=True, key="qp_1"):
-                    a = process_natural_query("Which markets need attention?", df, metrics, kpis)
-                    st.session_state.ask_history.append({"question": "Which markets need attention?", "answer": a, "context": current_ctx})
+                    _store_ti("Which markets need attention?")
                     st.rerun()
             with qp_col2:
                 if st.button("Compare markets", use_container_width=True, key="qp_2"):
-                    a = process_natural_query("Compare markets", df, metrics, kpis)
-                    st.session_state.ask_history.append({"question": "Compare markets", "answer": a, "context": current_ctx})
+                    _store_ti("Compare markets")
                     st.rerun()
             with qp_col3:
                 if st.button("Summarize performance", use_container_width=True, key="qp_3"):
-                    a = process_natural_query("Summarize regional performance", df, metrics, kpis)
-                    st.session_state.ask_history.append({"question": "Summarize regional performance", "answer": a, "context": current_ctx})
+                    _store_ti("Summarize regional performance")
                     st.rerun()
             qp_col4, qp_col5, qp_col6 = st.columns(3)
             with qp_col4:
                 if st.button("Top markets by pass rate", use_container_width=True, key="qp_4"):
-                    a = process_natural_query("Top markets by pass rate", df, metrics, kpis)
-                    st.session_state.ask_history.append({"question": "Top markets by pass rate", "answer": a, "context": current_ctx})
+                    _store_ti("Top markets by pass rate")
                     st.rerun()
             with qp_col5:
                 if st.button("Training volume trend", use_container_width=True, key="qp_5"):
-                    a = process_natural_query("How has training volume changed over time?", df, metrics, kpis)
-                    st.session_state.ask_history.append({"question": "How has training volume changed over time?", "answer": a, "context": current_ctx})
+                    _store_ti("How has training volume changed over time?")
                     st.rerun()
             with qp_col6:
                 if st.button("How many unique learners?", use_container_width=True, key="qp_6"):
-                    a = process_natural_query("How many unique learners were trained?", df, metrics, kpis)
-                    st.session_state.ask_history.append({"question": "How many unique learners were trained?", "answer": a, "context": current_ctx})
+                    _store_ti("How many unique learners were trained?")
                     st.rerun()
         elif _ti_n_accounts > 1:
             # Market view prompts
             qp_col1, qp_col2, qp_col3 = st.columns(3)
             with qp_col1:
                 if st.button("Which accounts need attention?", use_container_width=True, key="qp_1"):
-                    a = process_natural_query("Which accounts need attention?", df, metrics, kpis)
-                    st.session_state.ask_history.append({"question": "Which accounts need attention?", "answer": a, "context": current_ctx})
+                    _store_ti("Which accounts need attention?")
                     st.rerun()
             with qp_col2:
                 if st.button("Compare accounts", use_container_width=True, key="qp_2"):
-                    a = process_natural_query("Compare accounts", df, metrics, kpis)
-                    st.session_state.ask_history.append({"question": "Compare accounts", "answer": a, "context": current_ctx})
+                    _store_ti("Compare accounts")
                     st.rerun()
             with qp_col3:
                 if st.button("Summarize this market", use_container_width=True, key="qp_3"):
-                    a = process_natural_query("Summarize performance", df, metrics, kpis)
-                    st.session_state.ask_history.append({"question": "Summarize performance", "answer": a, "context": current_ctx})
+                    _store_ti("Summarize performance")
                     st.rerun()
             qp_col4, qp_col5, qp_col6 = st.columns(3)
             with qp_col4:
                 if st.button("Lowest pass rate accounts", use_container_width=True, key="qp_4"):
-                    a = process_natural_query("Which account has the lowest pass rate?", df, metrics, kpis)
-                    st.session_state.ask_history.append({"question": "Which account has the lowest pass rate?", "answer": a, "context": current_ctx})
+                    _store_ti("Which account has the lowest pass rate?")
                     st.rerun()
             with qp_col5:
                 if st.button("Compare training methods", use_container_width=True, key="qp_5"):
-                    a = process_natural_query("Compare training methods", df, metrics, kpis)
-                    st.session_state.ask_history.append({"question": "Compare training methods", "answer": a, "context": current_ctx})
+                    _store_ti("Compare training methods")
                     st.rerun()
             with qp_col6:
                 if st.button("Trainer activity", use_container_width=True, key="qp_6"):
-                    a = process_natural_query("Show trainer activity", df, metrics, kpis)
-                    st.session_state.ask_history.append({"question": "Show trainer activity", "answer": a, "context": current_ctx})
+                    _store_ti("Show trainer activity")
                     st.rerun()
         else:
             # Account view prompts
             qp_col1, qp_col2, qp_col3 = st.columns(3)
             with qp_col1:
                 if st.button("Show pass rate", use_container_width=True, key="qp_1"):
-                    a = process_natural_query("What is the pass rate?", df, metrics, kpis)
-                    st.session_state.ask_history.append({"question": "What is the pass rate?", "answer": a, "context": current_ctx})
+                    _store_ti("What is the pass rate?")
                     st.rerun()
             with qp_col2:
                 if st.button("Which programs need attention?", use_container_width=True, key="qp_2"):
-                    a = process_natural_query("Which programs need attention?", df, metrics, kpis)
-                    st.session_state.ask_history.append({"question": "Which programs need attention?", "answer": a, "context": current_ctx})
+                    _store_ti("Which programs need attention?")
                     st.rerun()
             with qp_col3:
                 if st.button("Summarize this account", use_container_width=True, key="qp_3"):
-                    a = process_natural_query("Summarize performance", df, metrics, kpis)
-                    st.session_state.ask_history.append({"question": "Summarize performance", "answer": a, "context": current_ctx})
+                    _store_ti("Summarize performance")
                     st.rerun()
 
         # ─── TRAINING TYPE BREAKDOWN (Foundation / Activation / Reinforcement / Champion) ───
