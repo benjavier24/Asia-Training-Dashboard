@@ -3072,8 +3072,10 @@ if df is not None and len(df) > 0:
                 acct_data_overview.columns = ["Account", "Attendances"]
                 fig = px.bar(acct_data_overview.head(10), x="Attendances", y="Account", orientation="h",
                              color_discrete_sequence=["#00BAC7"])
+                # Highest at top: reverse y-axis so the largest bar appears first
                 fig.update_layout(height=280, margin=dict(l=0, r=0, t=10, b=0),
-                                  yaxis_title="", xaxis_title="Attendance Records")
+                                  yaxis_title="", xaxis_title="Attendance Records",
+                                  yaxis=dict(autorange="reversed"))
                 st.plotly_chart(fig, use_container_width=True)
 
 
