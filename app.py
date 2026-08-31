@@ -982,10 +982,10 @@ def generate_executive_insights(df, metrics, kpis, view_level="regional", active
                 bot_mkt, bot_rate = mkt_rates.index[-1], mkt_rates.iloc[-1]
                 gap = round(top_rate - bot_rate, 1)
                 insights.append(("positive", f"{top_mkt} has the highest pass rate at {top_rate:.1f}%",
-                                 f"{gap} pts above {bot_mkt} ({bot_rate:.1f}%)."))
+                                 f"{gap} percentage points above {bot_mkt} ({bot_rate:.1f}%)."))
                 if bot_rate < 70:
                     insights.append(("attention", f"{bot_mkt} has the lowest pass rate at {bot_rate:.1f}%",
-                                     f"{round(rate - bot_rate, 1)} pts below the regional average of {rate}%."))
+                                     f"{round(rate - bot_rate, 1)} percentage points below the regional average of {rate}%."))
         elif view_level == "market" and metrics.get("Account") and df["Account"].nunique() > 1:
             # Market: compare accounts
             acct_rates = df.groupby("Account")["Pass Flag"].mean().sort_values(ascending=False) * 100
@@ -998,7 +998,7 @@ def generate_executive_insights(df, metrics, kpis, view_level="regional", active
                 if bot_rate_a < rate:
                     diff = round(rate - bot_rate_a, 1)
                     insights.append(("attention", f"{bot_acct} has the lowest pass rate at {bot_rate_a:.1f}%",
-                                     f"{diff} pts below the {mkt_name} average of {rate}%."))
+                                     f"{diff} percentage points below the {mkt_name} average of {rate}%."))
         else:
             # Single scope: just report the rate
             if rate >= 85:
@@ -1046,10 +1046,10 @@ def generate_executive_insights(df, metrics, kpis, view_level="regional", active
     if "Attach Improvement" in kpis:
         imp = kpis["Attach Improvement"]
         if imp > 0:
-            insights.append(("positive", f"Attach rate improved by +{imp}pp post-training",
+            insights.append(("positive", f"Attach rate improved by +{imp} percentage points post-training",
                              "Measured 30 days after training delivery."))
         elif imp < 0:
-            insights.append(("critical", f"Attach rate declined by {abs(imp)}pp post-training",
+            insights.append(("critical", f"Attach rate declined by {abs(imp)} percentage points post-training",
                              "Investigate contributing factors in the affected accounts."))
 
     # --- TRAINING METHOD INSIGHTS ---
@@ -1066,7 +1066,7 @@ def generate_executive_insights(df, metrics, kpis, view_level="regional", active
             diff = round(top_m["pass_rate"] - bot_m["pass_rate"], 1)
             if diff > 2:
                 insights.append(("neutral",
-                    f"{top_m['Training Type']} recorded a {diff} pt higher pass rate than {bot_m['Training Type']}",
+                    f"{top_m['Training Type']} recorded a {diff} percentage point higher pass rate than {bot_m['Training Type']}",
                     f"{top_m['pass_rate']}% vs {bot_m['pass_rate']}%."))
 
     return insights
@@ -2312,13 +2312,13 @@ if df is not None and len(df) > 0:
         else:
             val = "N/A"
             is_muted = True
-        st.markdown(render_kpi_card("Attach Before", val, "pre-training", size="secondary", muted=is_muted), unsafe_allow_html=True)
+        st.markdown(render_kpi_card("Attach Rate Before", val, "pre-training baseline", size="secondary", muted=is_muted), unsafe_allow_html=True)
 
     with sec_col2:
         if "Avg Attach After" in kpis:
             val = f"{kpis['Avg Attach After']}%"
             imp = kpis.get("Attach Improvement", 0)
-            delta = f"+{imp}pp" if imp > 0 else f"{imp}pp"
+            delta = f"+{imp} pts vs before" if imp > 0 else f"{imp} pts vs before"
             delta_type = "positive" if imp > 0 else "negative" if imp < 0 else "neutral"
             is_muted = False
         else:
@@ -2326,7 +2326,7 @@ if df is not None and len(df) > 0:
             delta = "post-training"
             delta_type = "neutral"
             is_muted = True
-        st.markdown(render_kpi_card("Attach After", val, delta, delta_type, size="secondary", muted=is_muted), unsafe_allow_html=True)
+        st.markdown(render_kpi_card("Attach Rate After", val, delta, delta_type, size="secondary", muted=is_muted), unsafe_allow_html=True)
 
     with sec_col3:
         val = f"{kpis.get('Countries', 0)}"
@@ -2482,7 +2482,7 @@ if df is not None and len(df) > 0:
                         if pos == 1:
                             rank_badge = '<span style="font-size:0.6rem;background:#ECFDF5;color:#10B981;padding:2px 6px;border-radius:100px;font-weight:600;margin-left:6px;">#1 Pass Rate</span>'
                         elif pos == len(_pass_rank):
-                            rank_badge = '<span style="font-size:0.6rem;background:#FEF2F2;color:#EF4444;padding:2px 6px;border-radius:100px;font-weight:600;margin-left:6px;">Lowest</span>'
+                            rank_badge = '<span style="font-size:0.6rem;background:#FEF2F2;color:#EF4444;padding:2px 6px;border-radius:100px;font-weight:600;margin-left:6px;">Lowest Pass Rate</span>'
 
                 parts = [f"<strong style='font-size:0.95rem;'>{acct_name}</strong>{rank_badge}", f"📋 {trainings:,} trainings"]
                 if "Frontliners" in row and row["Frontliners"] > 0:
@@ -2500,17 +2500,17 @@ if df is not None and len(df) > 0:
                     if _mkt_avg_pass is not None and len(acct_breakdown) > 1:
                         diff = round(rate - _mkt_avg_pass, 1)
                         if diff > 0:
-                            vs_avg = f' <span style="font-size:0.7rem;color:#10B981;">+{diff} vs avg</span>'
+                            vs_avg = f' <span style="font-size:0.7rem;color:#10B981;">+{diff} pts vs market avg</span>'
                         elif diff < 0:
-                            vs_avg = f' <span style="font-size:0.7rem;color:#EF4444;">{diff} vs avg</span>'
+                            vs_avg = f' <span style="font-size:0.7rem;color:#EF4444;">{diff} pts vs market avg</span>'
                     parts.append(f'<span style="color:{color};font-weight:600;">{rate:.1f}%</span> pass rate{vs_avg}')
                 if "Avg Score" in row and pd.notna(row["Avg Score"]):
-                    parts.append(f"📝 {row['Avg Score']:.1f}% avg score")
+                    parts.append(f"📝 {row['Avg Score']:.1f}% avg assessment score")
                 if "AR Lift (pp)" in row and pd.notna(row["AR Lift (pp)"]):
                     lift = row["AR Lift (pp)"]
                     sign = "+" if lift > 0 else ""
                     color = "#2ecc71" if lift > 0 else "#e74c3c"
-                    parts.append(f'📈 <span style="color:{color};font-weight:600;">{sign}{lift:.1f}pp</span> attach lift')
+                    parts.append(f'📈 <span style="color:{color};font-weight:600;">{sign}{lift:.1f} pts</span> attach rate lift')
 
                 # Show trainers for this account (leaderboard style)
                 if metrics.get("Trainer"):
@@ -2549,6 +2549,19 @@ if df is not None and len(df) > 0:
         col_config_acct = {}
         if "Pass Rate" in acct_breakdown.columns:
             col_config_acct["Pass Rate"] = st.column_config.ProgressColumn("Pass Rate %", min_value=0, max_value=100, format="%.1f%%")
+        # Friendly, unambiguous column display names
+        if "Frontliners" in acct_breakdown.columns:
+            col_config_acct["Frontliners"] = st.column_config.NumberColumn("Unique Learners")
+        if "Avg Score" in acct_breakdown.columns:
+            col_config_acct["Avg Score"] = st.column_config.NumberColumn("Avg Assessment Score %", format="%.1f")
+        if "AR Before" in acct_breakdown.columns:
+            col_config_acct["AR Before"] = st.column_config.NumberColumn("Attach Rate Before %", format="%.1f")
+        if "AR After" in acct_breakdown.columns:
+            col_config_acct["AR After"] = st.column_config.NumberColumn("Attach Rate After %", format="%.1f")
+        if "AR Lift (pp)" in acct_breakdown.columns:
+            col_config_acct["AR Lift (pp)"] = st.column_config.NumberColumn("Attach Lift (pts)", format="%.1f")
+        if "Trainings" in acct_breakdown.columns:
+            col_config_acct["Trainings"] = st.column_config.NumberColumn("Training Sessions")
 
         st.dataframe(acct_breakdown, use_container_width=True, height=250, column_config=col_config_acct)
 
@@ -2581,9 +2594,10 @@ if df is not None and len(df) > 0:
                 with cols[i % 2]:
                     st.markdown(render_insight_card(status, headline, detail), unsafe_allow_html=True)
 
-        # Training Method Comparison
+        # Pass Rate by Training Method
         if metrics.get("Training Type") and metrics.get("Pass Flag") and df["Training Type"].nunique() > 1:
-            st.markdown('<div class="section-header">Training Method Comparison</div>', unsafe_allow_html=True)
+            st.markdown('<div class="section-header">Pass Rate by Training Method</div>', unsafe_allow_html=True)
+            st.markdown('<div style="font-size:0.72rem;color:#6B7280;margin-bottom:6px;">Each method\'s pass rate, with the number of unique sessions delivered via that method.</div>', unsafe_allow_html=True)
             # Count unique sessions per method; pass rate from all rows
             df_method_sessions = get_unique_sessions(df, metrics)
             method_session_counts = df_method_sessions.groupby("Training Type").size().reset_index(name="sessions")
@@ -2597,7 +2611,7 @@ if df is not None and len(df) > 0:
                 <div class="method-row">
                     <span class="method-name">{row["Training Type"]}</span>
                     <span class="method-stat">{row["sessions"]:,} sessions</span>
-                    <span class="method-rate">{row["pass_rate"]}%</span>
+                    <span class="method-rate">{row["pass_rate"]}% <span style="font-size:0.62rem;font-weight:400;color:#9CA3AF;">pass rate</span></span>
                 </div>
                 """, unsafe_allow_html=True)
 
@@ -2813,6 +2827,7 @@ if df is not None and len(df) > 0:
         st.markdown("")
         if metrics.get("Training Type") and len(df) > 0:
             st.markdown('<div class="section-header">Training Type Breakdown</div>', unsafe_allow_html=True)
+            st.markdown('<div style="font-size:0.72rem;color:#6B7280;margin-bottom:6px;">Number of unique training sessions delivered per type, and each type\'s share of all sessions.</div>', unsafe_allow_html=True)
 
             # Count unique sessions per training type using the reusable session helper
             df_type_sessions = get_unique_sessions(df, metrics)
@@ -2836,7 +2851,7 @@ if df is not None and len(df) > 0:
                     <div class="kpi-card" style="border-left: 4px solid {color};">
                         <div class="kpi-label">{row["Type"]}</div>
                         <div class="kpi-value" style="color: {color};">{row["Sessions"]:,}</div>
-                        <div class="kpi-delta">{row["% of Total"]}% of trainings</div>
+                        <div class="kpi-delta">sessions · {row["% of Total"]}% of total</div>
                     </div>
                     """, unsafe_allow_html=True)
 
@@ -2844,6 +2859,7 @@ if df is not None and len(df) > 0:
             st.markdown("")
             type_chart_col1, type_chart_col2 = st.columns([1, 1])
             with type_chart_col1:
+                st.markdown('<div style="font-size:0.72rem;color:#6B7280;margin-bottom:2px;">Share of total sessions by type</div>', unsafe_allow_html=True)
                 colors = [type_colors.get(t, "#99E4E8") for t in type_data["Type"]]
                 fig = px.pie(type_data, values="Sessions", names="Type",
                              color_discrete_sequence=colors, hole=0.5)
@@ -3000,9 +3016,10 @@ if df is not None and len(df) > 0:
         if metrics.get("Country"):
             with overview_col1:
                 st.markdown('<div class="section-header">Training by Market</div>', unsafe_allow_html=True)
+                st.markdown('<div style="font-size:0.72rem;color:#6B7280;margin-bottom:2px;">Share of learner attendance records by market</div>', unsafe_allow_html=True)
                 country_data = df["Country"].value_counts().reset_index()
-                country_data.columns = ["Country", "Records"]
-                fig = px.pie(country_data, values="Records", names="Country",
+                country_data.columns = ["Country", "Attendances"]
+                fig = px.pie(country_data, values="Attendances", names="Country",
                              color_discrete_sequence=["#00BAC7", "#33C8D2", "#66D6DD", "#99E4E8", "#CCF2F3", "#E6F9FA"],
                              hole=0.45)
                 fig.update_layout(height=280, margin=dict(l=0, r=0, t=10, b=0),
@@ -3012,12 +3029,13 @@ if df is not None and len(df) > 0:
         if metrics.get("Account"):
             with overview_col2:
                 st.markdown('<div class="section-header">Training by Partner</div>', unsafe_allow_html=True)
+                st.markdown('<div style="font-size:0.72rem;color:#6B7280;margin-bottom:2px;">Learner attendance records by partner (top 10)</div>', unsafe_allow_html=True)
                 acct_data_overview = df["Account"].value_counts().reset_index()
-                acct_data_overview.columns = ["Account", "Records"]
-                fig = px.bar(acct_data_overview.head(10), x="Records", y="Account", orientation="h",
+                acct_data_overview.columns = ["Account", "Attendances"]
+                fig = px.bar(acct_data_overview.head(10), x="Attendances", y="Account", orientation="h",
                              color_discrete_sequence=["#00BAC7"])
                 fig.update_layout(height=280, margin=dict(l=0, r=0, t=10, b=0),
-                                  yaxis_title="", xaxis_title="Sessions")
+                                  yaxis_title="", xaxis_title="Attendance Records")
                 st.plotly_chart(fig, use_container_width=True)
 
 
@@ -3254,7 +3272,7 @@ if df is not None and len(df) > 0:
                         height=280,
                         margin=dict(l=10, r=10, t=10, b=10),
                         showlegend=False,
-                        annotations=[dict(text=f"{completion['completion_rate']}%", x=0.5, y=0.5,
+                        annotations=[dict(text=f"{completion['completion_rate']}%<br><span style='font-size:11px;color:#9CA3AF'>completed</span>", x=0.5, y=0.5,
                                           font_size=24, font_color="#00BAC7", showarrow=False)]
                     )
                     st.plotly_chart(fig_donut, use_container_width=True)
