@@ -2696,6 +2696,14 @@ if df is not None and len(df) > 0:
 
             training_summary = training_summary.sort_values("Sessions", ascending=False)
 
+            # Reorder columns so Training Type appears right after Training Name
+            if "Training Type" in training_summary.columns:
+                cols = training_summary.columns.tolist()
+                cols.remove("Training Type")
+                name_idx = cols.index("Training Name") + 1
+                cols.insert(name_idx, "Training Type")
+                training_summary = training_summary[cols]
+
             col_config_training = {}
             if "Pass Rate (%)" in training_summary.columns:
                 col_config_training["Pass Rate (%)"] = st.column_config.ProgressColumn(
