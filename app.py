@@ -1054,10 +1054,8 @@ def generate_executive_insights(df, metrics, kpis, view_level="regional", active
 
     # --- TRAINING METHOD INSIGHTS ---
     if metrics.get("Training Type") and df["Training Type"].nunique() > 1 and metrics.get("Pass Flag"):
-        method_perf = df.groupby("Training Type").agg(
-            sessions=("Training Type", "count"),
-            pass_rate=("Pass Flag", "mean")
-        ).reset_index()
+        method_perf = df.groupby("Training Type")["Pass Flag"].mean().reset_index()
+        method_perf.columns = ["Training Type", "pass_rate"]
         method_perf["pass_rate"] = (method_perf["pass_rate"] * 100).round(1)
         method_perf = method_perf.sort_values("pass_rate", ascending=False)
         if len(method_perf) >= 2:
@@ -3107,10 +3105,13 @@ if df is not None and len(df) > 0:
         if metrics.get("Trainer") and metrics.get("Pass Flag"):
             with perf_col2:
                 st.markdown('<div class="section-header">Trainer Performance</div>', unsafe_allow_html=True)
-                t_data = df.groupby("Trainer").agg(
-                    sessions=("Date", "count"),
-                    pass_rate=("Pass Flag", "mean")
-                ).reset_index()
+                # Pass rate from all rows; sessions = unique sessions per trainer
+                t_pass = df.groupby("Trainer")["Pass Flag"].mean().reset_index()
+                t_pass.columns = ["Trainer", "pass_rate"]
+                df_trainer_sessions = get_unique_sessions(df, metrics)
+                t_sessions = df_trainer_sessions.groupby("Trainer").size().reset_index(name="sessions")
+                t_data = t_pass.merge(t_sessions, on="Trainer", how="left")
+                t_data["sessions"] = t_data["sessions"].fillna(0).astype(int)
                 t_data["Pass Rate (%)"] = (t_data["pass_rate"] * 100).round(1)
                 t_data = t_data.sort_values("Pass Rate (%)", ascending=False)
 
@@ -3221,11 +3222,21 @@ if df is not None and len(df) > 0:
                 col_config = {}
                 if "Pass Rate" in store_data.columns:
                     col_config["Pass Rate"] = st.column_config.ProgressColumn("Pass Rate %", min_value=0, max_value=100, format="%.1f%%")
+                if "Records" in store_data.columns:
+                    col_config["Records"] = st.column_config.NumberColumn("Learner Attendances")
+                if "Avg Score" in store_data.columns:
+                    col_config["Avg Score"] = st.column_config.NumberColumn("Avg Assessment Score", format="%.1f")
+                if "Attach Before" in store_data.columns:
+                    col_config["Attach Before"] = st.column_config.NumberColumn("Attach Rate Before %", format="%.1f")
+                if "Attach After" in store_data.columns:
+                    col_config["Attach After"] = st.column_config.NumberColumn("Attach Rate After %", format="%.1f")
+                if "Improvement (pp)" in store_data.columns:
+                    col_config["Improvement (pp)"] = st.column_config.NumberColumn("Attach Lift (pts)", format="%.1f")
 
                 st.dataframe(store_data, use_container_width=True, height=350, column_config=col_config)
 
             with store_col2:
-                st.metric("Stores Trained", df["Store"].nunique())
+                st.metric("Stores Reached", df["Store"].nunique())
                 if "Pass Rate" in store_data.columns:
                     st.markdown("**🏆 Top 5**")
                     for _, row in store_data.nlargest(5, "Pass Rate").iterrows():
