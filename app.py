@@ -1012,16 +1012,16 @@ def generate_executive_insights(df, metrics, kpis, view_level="regional", active
     if "Avg Assessment Score" in kpis:
         score = kpis["Avg Assessment Score"]
         if view_level == "regional" and metrics.get("Country") and df["Country"].nunique() > 1:
-            mkt_scores = df.groupby("Country")["Assessment Score"].mean().sort_values(ascending=False)
-            if mkt_scores.max() <= 1:
+            mkt_scores = df.groupby("Country")["Assessment Score"].mean().dropna().sort_values(ascending=False)
+            if len(mkt_scores) > 0 and mkt_scores.mean() <= 1:
                 mkt_scores = mkt_scores * 100
             if len(mkt_scores) > 1:
                 top_s = mkt_scores.index[0]
                 insights.append(("neutral", f"Highest avg score: {top_s} at {mkt_scores.iloc[0]:.1f}%",
                                  f"Regional average is {score}%."))
         elif view_level == "market" and metrics.get("Account") and df["Account"].nunique() > 1:
-            acct_scores = df.groupby("Account")["Assessment Score"].mean().sort_values(ascending=False)
-            if acct_scores.max() <= 1:
+            acct_scores = df.groupby("Account")["Assessment Score"].mean().dropna().sort_values(ascending=False)
+            if len(acct_scores) > 0 and acct_scores.mean() <= 1:
                 acct_scores = acct_scores * 100
             if len(acct_scores) > 1:
                 bot_s_acct = acct_scores.index[-1]
@@ -1029,7 +1029,7 @@ def generate_executive_insights(df, metrics, kpis, view_level="regional", active
                 diff = round(score - bot_s_val, 1)
                 if diff > 5:
                     insights.append(("attention", f"{bot_s_acct} has the lowest avg score at {bot_s_val:.1f}%",
-                                     f"{diff} pts below the market average."))
+                                     f"{diff} percentage points below the market average."))
 
     # --- VOLUME INSIGHTS ---
     if view_level == "regional" and metrics.get("Country") and df["Country"].nunique() > 1:
@@ -1094,8 +1094,11 @@ def generate_needs_attention(df, metrics, kpis, view_level="regional"):
 
     # Add low-score programs
     if metrics.get("Training Name") and metrics.get("Assessment Score") and df["Training Name"].nunique() > 1:
-        prog_scores = df.groupby("Training Name")["Assessment Score"].mean().sort_values()
-        if prog_scores.max() <= 1:
+        prog_scores = df.groupby("Training Name")["Assessment Score"].mean().dropna().sort_values()
+        # Normalize the whole series to a 0-100 percentage scale.
+        # Detect decimal storage by checking the overall mean, not the max
+        # (a single outlier shouldn't flip the scaling for everyone).
+        if len(prog_scores) > 0 and prog_scores.mean() <= 1:
             prog_scores = prog_scores * 100
         overall_avg = kpis.get("Avg Assessment Score", 0)
         for prog, score in prog_scores.items():

@@ -440,6 +440,31 @@ def test_p41_no_fake_confidence():
     print("PASS Test P4.1-F: No fake confidence scores")
 
 
+def test_score_scaling_needs_attention():
+    """Needs-attention low-score programs must show 60.0%, not 0.6%."""
+    from app import generate_needs_attention
+    rows = []
+    # High-score program
+    for i in range(10):
+        rows.append({"Date": "2026-03-01", "Training Name": "Good Program", "Trainer": "Benj Javier",
+                     "Country": "PH", "Assessment Score": 0.95, "Pass Flag": 1})
+    # Low-score program (0.6 = 60%)
+    for i in range(10):
+        rows.append({"Date": "2026-03-02", "Training Name": "Weak Program", "Trainer": "Andrea Cruz",
+                     "Country": "PH", "Assessment Score": 0.6, "Pass Flag": 0})
+    df = make_df(rows)
+    metrics = detect_metrics(df)
+    kpis = compute_kpis(df, metrics)
+    items = generate_needs_attention(df, metrics, kpis, "market")
+    # Find any low-score item and verify it's scaled to percentage (60.0%, not 0.6%)
+    score_items = [it for it in items if "score" in it[1]]
+    if score_items:
+        metric_str = score_items[0][2]
+        val = float(metric_str.replace("%", ""))
+        assert val > 1, f"Score should be scaled to percentage (e.g. 60.0%), got {metric_str}"
+    print("PASS Test SCALE: Needs-attention scores shown as percentage (60%, not 0.6%)")
+
+
 def _run_all_tests():
     test_a_repeated_trainee_rows()
     test_b_multiple_sessions_same_week()
@@ -466,6 +491,8 @@ def _run_all_tests():
     test_p41_limited_data_status()
     test_p41_ranking_basis()
     test_p41_no_fake_confidence()
+    print("--- Phase 4.1 tests passed ---")
+    test_score_scaling_needs_attention()
     print("\nAll tests passed!")
 
 
