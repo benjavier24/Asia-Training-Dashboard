@@ -1597,8 +1597,9 @@ def run_training_intelligence(question, df, metrics, kpis):
         meta["calc_desc"] = CALC_DESCRIPTIONS["Average Assessment Score"]
         if len(scores) > 0:
             avg = scores.mean()
-            avg = avg * 100 if avg <= 1 else avg
-            scores_pct = scores * 100 if scores.max() <= 1 else scores
+            _score_is_decimal = avg <= 1
+            avg = avg * 100 if _score_is_decimal else avg
+            scores_pct = scores * 100 if _score_is_decimal else scores
             answer_parts.append(f"**Avg Assessment Score: {avg:.1f}%**")
             supporting.append(f"Min: {scores_pct.min():.0f}% · Max: {scores_pct.max():.0f}% · Median: {scores_pct.median():.0f}%")
             supporting.append(f"Assessed: {len(scores):,} records")
@@ -1634,7 +1635,9 @@ def run_training_intelligence(question, df, metrics, kpis):
         for trainer in subset["Trainer"].dropna().unique():
             t_df = subset[subset["Trainer"] == trainer]
             t_sessions = get_unique_session_count(t_df)
-            t_rate = t_df["Pass Flag"].mean() * 100 if "Pass Flag" in t_df.columns else None
+            t_rate = None
+            if "Pass Flag" in t_df.columns and t_df["Pass Flag"].notna().sum() > 0:
+                t_rate = t_df["Pass Flag"].mean() * 100
             trainer_data.append({"name": trainer, "sessions": t_sessions, "pass_rate": t_rate})
         trainer_data.sort(key=lambda x: x["sessions"], reverse=True)
 
@@ -1655,7 +1658,7 @@ def run_training_intelligence(question, df, metrics, kpis):
             m_df = subset[subset["Training Type"] == method]
             m_sessions = get_unique_session_count(m_df)
             line = f"• {method}: {m_sessions} sessions"
-            if "Pass Flag" in m_df.columns:
+            if "Pass Flag" in m_df.columns and m_df["Pass Flag"].notna().sum() > 0:
                 line += f", Pass Rate: {m_df['Pass Flag'].mean() * 100:.1f}%"
             answer_parts.append(line)
         follow_ups = ["Which method has the highest pass rate?", "Show trend", "Compare accounts"]
@@ -1667,7 +1670,7 @@ def run_training_intelligence(question, df, metrics, kpis):
             p_df = subset[subset["Training Name"] == prog]
             p_sessions = get_unique_session_count(p_df)
             line = f"• {prog}: {p_sessions} sessions"
-            if "Pass Flag" in p_df.columns:
+            if "Pass Flag" in p_df.columns and p_df["Pass Flag"].notna().sum() > 0:
                 line += f", Pass Rate: {p_df['Pass Flag'].mean() * 100:.1f}%"
             answer_parts.append(line)
         follow_ups = ["Which program has the lowest pass rate?", "Compare methods", "Summarize"]
@@ -1866,12 +1869,13 @@ def compute_store_completion(df, duration_days=30, reference_date=None):
         store_df = df[df["Store"] == store]
         window_store_df = window_df[window_df["Store"] == store]
         last_training = store_df["Date"].max()
-        sessions_in_window = len(window_store_df)
+        # Attendance records within the window (row count). Labeled clearly as attendances.
+        attendances_in_window = len(window_store_df)
         status = "✅ Completed" if store in completed_stores else "⏳ Pending"
         store_details.append({
             "Store": store,
             "Status": status,
-            "Sessions in Window": sessions_in_window,
+            "Attendances in Window": attendances_in_window,
             "Last Training Date": last_training,
             "Days Since Last Training": (reference_date - last_training).days if pd.notna(last_training) else None
         })
@@ -2449,13 +2453,17 @@ if df is not None and len(df) > 0:
             acct_breakdown["Pass Rate"] = (acct_breakdown["Pass Rate"] * 100).round(1)
         if "Avg Score" in acct_breakdown.columns:
             scores = acct_breakdown["Avg Score"]
-            acct_breakdown["Avg Score"] = (scores * 100 if scores.max() <= 1 else scores).round(1)
+            acct_breakdown["Avg Score"] = (scores * 100 if scores.mean() <= 1 else scores).round(1)
         if "AR Before" in acct_breakdown.columns:
-            if acct_breakdown["AR Before"].max() <= 1:
+            if acct_breakdown["AR Before"].mean() <= 1:
                 acct_breakdown["AR Before"] = (acct_breakdown["AR Before"] * 100).round(1)
+            else:
+                acct_breakdown["AR Before"] = acct_breakdown["AR Before"].round(1)
         if "AR After" in acct_breakdown.columns:
-            if acct_breakdown["AR After"].max() <= 1:
+            if acct_breakdown["AR After"].mean() <= 1:
                 acct_breakdown["AR After"] = (acct_breakdown["AR After"] * 100).round(1)
+            else:
+                acct_breakdown["AR After"] = acct_breakdown["AR After"].round(1)
         if "AR Before" in acct_breakdown.columns and "AR After" in acct_breakdown.columns:
             acct_breakdown["AR Lift (pp)"] = (acct_breakdown["AR After"] - acct_breakdown["AR Before"]).round(1)
 
@@ -3011,9 +3019,12 @@ if df is not None and len(df) > 0:
                             after=("Attach Rate After", "mean"),
                             n=("Attach Rate Before", "count")
                         ).reset_index()
-                        if attach_grouped["before"].max() <= 1:
+                        if attach_grouped["before"].mean() <= 1:
                             attach_grouped["before"] = (attach_grouped["before"] * 100).round(1)
                             attach_grouped["after"] = (attach_grouped["after"] * 100).round(1)
+                        else:
+                            attach_grouped["before"] = attach_grouped["before"].round(1)
+                            attach_grouped["after"] = attach_grouped["after"].round(1)
                         attach_grouped["Improvement"] = (attach_grouped["after"] - attach_grouped["before"]).round(1)
                         attach_grouped = attach_grouped.sort_values("Improvement", ascending=False)
 
@@ -3207,10 +3218,13 @@ if df is not None and len(df) > 0:
                         before=("Attach Rate Before", "mean"),
                         after=("Attach Rate After", "mean")
                     ).reset_index()
-                    if attach_data["before"].max() <= 1:
-                        attach_data["before"] = attach_data["before"] * 100
-                        attach_data["after"] = attach_data["after"] * 100
-                    attach_data["Improvement"] = attach_data["after"] - attach_data["before"]
+                    if attach_data["before"].mean() <= 1:
+                        attach_data["before"] = (attach_data["before"] * 100).round(1)
+                        attach_data["after"] = (attach_data["after"] * 100).round(1)
+                    else:
+                        attach_data["before"] = attach_data["before"].round(1)
+                        attach_data["after"] = attach_data["after"].round(1)
+                    attach_data["Improvement"] = (attach_data["after"] - attach_data["before"]).round(1)
                     attach_data = attach_data.sort_values("Improvement", ascending=False)
 
                     fig = go.Figure()
@@ -3257,12 +3271,16 @@ if df is not None and len(df) > 0:
                     store_data["Pass Rate"] = (store_data["Pass Rate"] * 100).round(1)
                 if "Avg Score" in store_data.columns:
                     scores = store_data["Avg Score"]
-                    store_data["Avg Score"] = (scores * 100 if scores.max() <= 1 else scores).round(1)
+                    store_data["Avg Score"] = (scores * 100 if scores.mean() <= 1 else scores).round(1)
                 if "Attach Before" in store_data.columns:
-                    if store_data["Attach Before"].max() <= 1:
+                    if store_data["Attach Before"].mean() <= 1:
                         store_data["Attach Before"] = (store_data["Attach Before"] * 100).round(1)
                         if "Attach After" in store_data.columns:
                             store_data["Attach After"] = (store_data["Attach After"] * 100).round(1)
+                    else:
+                        store_data["Attach Before"] = store_data["Attach Before"].round(1)
+                        if "Attach After" in store_data.columns:
+                            store_data["Attach After"] = store_data["Attach After"].round(1)
                 if "Attach Before" in store_data.columns and "Attach After" in store_data.columns:
                     store_data["Improvement (pp)"] = (store_data["Attach After"] - store_data["Attach Before"]).round(1)
 
@@ -3363,7 +3381,7 @@ if df is not None and len(df) > 0:
                     detail_df = completion["store_details"].copy()
                     detail_df["Last Training Date"] = pd.to_datetime(detail_df["Last Training Date"]).dt.strftime("%b %d, %Y")
                     col_config = {
-                        "Sessions in Window": st.column_config.NumberColumn("Sessions", format="%d"),
+                        "Attendances in Window": st.column_config.NumberColumn("Attendances", format="%d"),
                         "Days Since Last Training": st.column_config.NumberColumn("Days Since", format="%d days"),
                     }
                     st.dataframe(detail_df, use_container_width=True, height=280, column_config=col_config)
