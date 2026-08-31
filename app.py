@@ -2908,7 +2908,8 @@ if df is not None and len(df) > 0:
         if metrics.get("Training Name") and len(df) > 0:
             st.markdown('<div class="section-header">Training Programs Summary</div>', unsafe_allow_html=True)
 
-            training_agg = {"Sessions": ("Training Name", "count")}
+            # Learner Attendances = row count; Sessions = unique sessions (computed separately below)
+            training_agg = {"Attendances": ("Training Name", "count")}
             if metrics.get("Pass Flag"):
                 training_agg["Pass Rate (%)"] = ("Pass Flag", "mean")
             if metrics.get("Assessment Score"):
@@ -2926,27 +2927,47 @@ if df is not None and len(df) > 0:
 
             training_summary = df.groupby(groupby_training).agg(**training_agg).reset_index()
 
+            # Compute UNIQUE sessions per training program using the standard session helper
+            df_prog_sessions = get_unique_sessions(df, metrics)
+            prog_session_counts = df_prog_sessions.groupby("Training Name").size().reset_index(name="Sessions")
+            training_summary = training_summary.merge(prog_session_counts, on="Training Name", how="left")
+            training_summary["Sessions"] = training_summary["Sessions"].fillna(0).astype(int)
+
             if "Pass Rate (%)" in training_summary.columns:
                 training_summary["Pass Rate (%)"] = (training_summary["Pass Rate (%)"] * 100).round(1)
             if "Avg Score" in training_summary.columns:
                 scores = training_summary["Avg Score"]
                 training_summary["Avg Score"] = (scores * 100 if scores.max() <= 1 else scores).round(1)
 
+            # Order columns: Name, Type, Sessions, Attendances, then the rest
             training_summary = training_summary.sort_values("Sessions", ascending=False)
 
-            # Reorder columns so Training Type appears right after Training Name
+            # Reorder columns: Training Name, Training Type, Sessions, Attendances, then the rest
+            desired_order = ["Training Name"]
             if "Training Type" in training_summary.columns:
-                cols = training_summary.columns.tolist()
-                cols.remove("Training Type")
-                name_idx = cols.index("Training Name") + 1
-                cols.insert(name_idx, "Training Type")
-                training_summary = training_summary[cols]
+                desired_order.append("Training Type")
+            desired_order.append("Sessions")
+            if "Attendances" in training_summary.columns:
+                desired_order.append("Attendances")
+            for c in training_summary.columns:
+                if c not in desired_order:
+                    desired_order.append(c)
+            training_summary = training_summary[[c for c in desired_order if c in training_summary.columns]]
 
             col_config_training = {}
             if "Pass Rate (%)" in training_summary.columns:
                 col_config_training["Pass Rate (%)"] = st.column_config.ProgressColumn(
                     "Pass Rate %", min_value=0, max_value=100, format="%.1f%%"
                 )
+            col_config_training["Sessions"] = st.column_config.NumberColumn("Training Sessions")
+            if "Attendances" in training_summary.columns:
+                col_config_training["Attendances"] = st.column_config.NumberColumn("Learner Attendances")
+            if "Learners" in training_summary.columns:
+                col_config_training["Learners"] = st.column_config.NumberColumn("Unique Learners")
+            if "Avg Score" in training_summary.columns:
+                col_config_training["Avg Score"] = st.column_config.NumberColumn("Avg Assessment Score", format="%.1f")
+            if "Stores" in training_summary.columns:
+                col_config_training["Stores"] = st.column_config.NumberColumn("Stores Reached")
 
             st.dataframe(training_summary, use_container_width=True, height=300, column_config=col_config_training)
 
