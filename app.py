@@ -3058,11 +3058,18 @@ if df is not None and len(df) > 0:
             else:
                 st.info("No attach rate data available for the current filter selection.")
 
-        # ─── MARKET BREAKDOWN ───
-        st.markdown("")
-        overview_col1, overview_col2 = st.columns(2)
+        # ─── MARKET / PARTNER BREAKDOWN ───
+        # Only show these comparison charts when there are multiple entities to compare.
+        _show_market_chart = metrics.get("Country") and df["Country"].nunique() > 1
+        _show_partner_chart = metrics.get("Account") and df["Account"].nunique() > 1
 
-        if metrics.get("Country"):
+        if _show_market_chart or _show_partner_chart:
+            st.markdown("")
+            overview_col1, overview_col2 = st.columns(2)
+        else:
+            overview_col1 = overview_col2 = None
+
+        if _show_market_chart:
             with overview_col1:
                 st.markdown('<div class="section-header">Training by Market</div>', unsafe_allow_html=True)
                 st.markdown('<div style="font-size:0.72rem;color:#6B7280;margin-bottom:2px;">Share of learner attendance records by market</div>', unsafe_allow_html=True)
@@ -3075,8 +3082,10 @@ if df is not None and len(df) > 0:
                                   legend=dict(orientation="h", yanchor="bottom", y=-0.2))
                 st.plotly_chart(fig, use_container_width=True)
 
-        if metrics.get("Account"):
-            with overview_col2:
+        if _show_partner_chart:
+            # Use overview_col2 if the market chart is also shown, else full width via overview_col1
+            _partner_container = overview_col2 if _show_market_chart else overview_col1
+            with _partner_container:
                 st.markdown('<div class="section-header">Training by Partner</div>', unsafe_allow_html=True)
 
                 # Metric toggle — default to Unique Learners (most intuitive for leadership)
