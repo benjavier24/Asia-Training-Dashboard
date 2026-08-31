@@ -286,7 +286,65 @@ def test_ti_unsupported():
     print("PASS Test TI-E: Unsupported question gets safe response")
 
 
-if __name__ == "__main__":
+# === PHASE 4 CLEANUP TESTS ===
+
+def test_p4_missing_score_no_nan():
+    """Comparison with a market that has no assessment scores should show 'No data', not nan."""
+    rows = []
+    # PH with scores
+    for i in range(5):
+        rows.append({"Date": "2026-03-01", "Training Name": "Foundation", "Trainer": "Benj Javier", "Country": "PH", "Assessment Score": 0.9, "Pass Flag": 1})
+    # SG with NO scores (NaN)
+    for i in range(5):
+        rows.append({"Date": "2026-03-01", "Training Name": "Champion", "Trainer": "Lisa Tan", "Country": "SG", "Assessment Score": None, "Pass Flag": 1})
+
+    df = make_df(rows)
+    metrics = detect_metrics(df)
+    kpis = compute_kpis(df, metrics)
+
+    from app import process_natural_query
+    answer = process_natural_query("Compare markets", df, metrics, kpis)
+    assert "nan" not in answer.lower(), f"Should not contain 'nan'. Got: {answer}"
+    assert "No data" in answer, f"Should show 'No data' for missing scores. Got: {answer}"
+    print("PASS Test P4-A: Missing scores show 'No data', not nan")
+
+
+def test_p4_comparison_is_table():
+    """Comparison output should be a structured markdown table."""
+    rows = []
+    for country in ["PH", "MY", "TH"]:
+        for i in range(5):
+            rows.append({"Date": "2026-03-01", "Training Name": f"Prog{country}", "Trainer": f"Trainer{country}",
+                         "Country": country, "Assessment Score": 0.8, "Pass Flag": 1})
+
+    df = make_df(rows)
+    metrics = detect_metrics(df)
+    kpis = compute_kpis(df, metrics)
+
+    from app import process_natural_query
+    answer = process_natural_query("Compare markets", df, metrics, kpis)
+    # Markdown table has header separator row
+    assert "| ---" in answer or "|---" in answer, f"Should be a table. Got: {answer}"
+    assert "Pass Rate" in answer and "Sessions" in answer, f"Table should have columns. Got: {answer}"
+    print("PASS Test P4-B: Comparison renders as structured table")
+
+
+def test_p4_context_in_answer():
+    """Each answer should include its context line."""
+    rows = [
+        {"Date": "2026-03-01", "Training Name": "Foundation", "Trainer": "Benj Javier", "Country": "PH", "Pass Flag": 1}
+    ]
+    df = make_df(rows)
+    metrics = detect_metrics(df)
+    kpis = compute_kpis(df, metrics)
+
+    from app import process_natural_query
+    answer = process_natural_query("Summarize performance", df, metrics, kpis)
+    assert "Context:" in answer, f"Answer should include context line. Got: {answer[:100]}"
+    print("PASS Test P4-C: Answer includes context line")
+
+
+def _run_all_tests():
     test_a_repeated_trainee_rows()
     test_b_multiple_sessions_same_week()
     test_c_training_id()
@@ -301,4 +359,12 @@ if __name__ == "__main__":
     test_ti_unique_learner()
     test_ti_insufficient_scope()
     test_ti_unsupported()
+    print("--- Training Intelligence tests passed ---")
+    test_p4_missing_score_no_nan()
+    test_p4_comparison_is_table()
+    test_p4_context_in_answer()
     print("\nAll tests passed!")
+
+
+if __name__ == "__main__":
+    _run_all_tests()
