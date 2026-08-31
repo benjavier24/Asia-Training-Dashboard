@@ -2908,8 +2908,17 @@ if df is not None and len(df) > 0:
         # ─── TRAINING NAMES SUMMARY TABLE ───
         if metrics.get("Training Name") and len(df) > 0:
             st.markdown('<div class="section-header">Training Programs Summary</div>', unsafe_allow_html=True)
+            st.markdown('<div style="font-size:0.72rem;color:#6B7280;margin-bottom:6px;">One row per program, delivery method, and market. Click any column header to sort.</div>', unsafe_allow_html=True)
 
-            # Learner Attendances = row count; Sessions = unique sessions (computed separately below)
+            # Grouping dimensions: Market → Training Name → Training Type
+            group_cols = []
+            if metrics.get("Country"):
+                group_cols.append("Country")
+            group_cols.append("Training Name")
+            if metrics.get("Training Type"):
+                group_cols.append("Training Type")
+
+            # Learner Attendances = row count within each group
             training_agg = {"Attendances": ("Training Name", "count")}
             if metrics.get("Pass Flag"):
                 training_agg["Pass Rate (%)"] = ("Pass Flag", "mean")
@@ -2922,29 +2931,34 @@ if df is not None and len(df) > 0:
             if metrics.get("Store"):
                 training_agg["Stores"] = ("Store", "nunique")
 
-            groupby_training = ["Training Name"]
-            if metrics.get("Training Type"):
-                groupby_training = ["Training Name", "Training Type"]
+            training_summary = df.groupby(group_cols).agg(**training_agg).reset_index()
 
-            training_summary = df.groupby(groupby_training).agg(**training_agg).reset_index()
-
-            # Compute UNIQUE sessions per training program using the standard session helper
+            # Compute UNIQUE sessions per group using the standard session helper,
+            # deduplicated within the same grouping so counts stay consistent.
             df_prog_sessions = get_unique_sessions(df, metrics)
-            prog_session_counts = df_prog_sessions.groupby("Training Name").size().reset_index(name="Sessions")
-            training_summary = training_summary.merge(prog_session_counts, on="Training Name", how="left")
+            prog_session_counts = df_prog_sessions.groupby(group_cols).size().reset_index(name="Sessions")
+            training_summary = training_summary.merge(prog_session_counts, on=group_cols, how="left")
             training_summary["Sessions"] = training_summary["Sessions"].fillna(0).astype(int)
 
             if "Pass Rate (%)" in training_summary.columns:
                 training_summary["Pass Rate (%)"] = (training_summary["Pass Rate (%)"] * 100).round(1)
             if "Avg Score" in training_summary.columns:
                 scores = training_summary["Avg Score"]
-                training_summary["Avg Score"] = (scores * 100 if scores.max() <= 1 else scores).round(1)
+                if len(scores) > 0 and scores.mean() <= 1:
+                    scores = scores * 100
+                training_summary["Avg Score"] = scores.round(1)
 
-            # Order columns: Name, Type, Sessions, Attendances, then the rest
+            # Map Country codes to full market names for display
+            if "Country" in training_summary.columns:
+                training_summary["Country"] = training_summary["Country"].map(lambda c: COUNTRY_NAMES.get(c, c))
+
             training_summary = training_summary.sort_values("Sessions", ascending=False)
 
-            # Reorder columns: Training Name, Training Type, Sessions, Attendances, then the rest
-            desired_order = ["Training Name"]
+            # Reorder columns: Market, Training Name, Training Type, Sessions, Attendances, then the rest
+            desired_order = []
+            if "Country" in training_summary.columns:
+                desired_order.append("Country")
+            desired_order.append("Training Name")
             if "Training Type" in training_summary.columns:
                 desired_order.append("Training Type")
             desired_order.append("Sessions")
@@ -2956,6 +2970,8 @@ if df is not None and len(df) > 0:
             training_summary = training_summary[[c for c in desired_order if c in training_summary.columns]]
 
             col_config_training = {}
+            if "Country" in training_summary.columns:
+                col_config_training["Country"] = st.column_config.TextColumn("Market")
             if "Pass Rate (%)" in training_summary.columns:
                 col_config_training["Pass Rate (%)"] = st.column_config.ProgressColumn(
                     "Pass Rate %", min_value=0, max_value=100, format="%.1f%%"
@@ -2970,7 +2986,7 @@ if df is not None and len(df) > 0:
             if "Stores" in training_summary.columns:
                 col_config_training["Stores"] = st.column_config.NumberColumn("Stores Reached")
 
-            st.dataframe(training_summary, use_container_width=True, height=300, column_config=col_config_training)
+            st.dataframe(training_summary, use_container_width=True, height=300, column_config=col_config_training, hide_index=True)
 
         # ─── ATTACH RATE IMPACT (30 Days Post-Training) ───
         if metrics.get("Attach Rate Before") and metrics.get("Attach Rate After") and len(df) > 0:
