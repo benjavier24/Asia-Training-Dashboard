@@ -3067,14 +3067,43 @@ if df is not None and len(df) > 0:
         if metrics.get("Account"):
             with overview_col2:
                 st.markdown('<div class="section-header">Training by Partner</div>', unsafe_allow_html=True)
-                st.markdown('<div style="font-size:0.72rem;color:#6B7280;margin-bottom:2px;">Learner attendance records by partner (top 10)</div>', unsafe_allow_html=True)
-                acct_data_overview = df["Account"].value_counts().reset_index()
-                acct_data_overview.columns = ["Account", "Attendances"]
-                fig = px.bar(acct_data_overview.head(10), x="Attendances", y="Account", orientation="h",
+
+                # Metric toggle — default to Unique Learners (most intuitive for leadership)
+                _partner_metric_opts = []
+                if metrics.get("Trainee Code") or metrics.get("Trainee Name"):
+                    _partner_metric_opts.append("Unique Learners")
+                _partner_metric_opts.append("Training Sessions")
+                _partner_metric_opts.append("Attendance Records")
+                partner_metric = st.radio(
+                    "Measure by", _partner_metric_opts, horizontal=True, key="partner_chart_metric",
+                    label_visibility="collapsed"
+                )
+
+                # Compute the chosen metric per partner
+                if partner_metric == "Unique Learners":
+                    learner_col = "Trainee Code" if metrics.get("Trainee Code") else "Trainee Name"
+                    partner_data = df.groupby("Account")[learner_col].nunique().reset_index(name="Value")
+                    x_title = "Unique Learners"
+                    caption = "Distinct people trained per partner (top 10)"
+                elif partner_metric == "Training Sessions":
+                    df_partner_sessions = get_unique_sessions(df, metrics)
+                    partner_data = df_partner_sessions.groupby("Account").size().reset_index(name="Value")
+                    x_title = "Training Sessions"
+                    caption = "Unique training sessions per partner (top 10)"
+                else:  # Attendance Records
+                    partner_data = df["Account"].value_counts().reset_index()
+                    partner_data.columns = ["Account", "Value"]
+                    x_title = "Attendance Records"
+                    caption = "Total learner attendance records per partner (top 10)"
+
+                st.markdown(f'<div style="font-size:0.72rem;color:#6B7280;margin-bottom:2px;">{caption}</div>', unsafe_allow_html=True)
+
+                partner_data = partner_data.sort_values("Value", ascending=False).head(10)
+                fig = px.bar(partner_data, x="Value", y="Account", orientation="h",
                              color_discrete_sequence=["#00BAC7"])
                 # Highest at top: reverse y-axis so the largest bar appears first
                 fig.update_layout(height=280, margin=dict(l=0, r=0, t=10, b=0),
-                                  yaxis_title="", xaxis_title="Attendance Records",
+                                  yaxis_title="", xaxis_title=x_title,
                                   yaxis=dict(autorange="reversed"))
                 st.plotly_chart(fig, use_container_width=True)
 
