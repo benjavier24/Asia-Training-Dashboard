@@ -361,6 +361,31 @@ st.markdown("""
         font-size: 0.8rem;
     }
 
+    /* Expander toggle icon — hide the Material icon text fallback ("arrow_right") */
+    [data-testid="stExpanderToggleIcon"],
+    [data-testid="stExpander"] summary svg,
+    .streamlit-expanderHeader svg {
+        display: none !important;
+    }
+    /* Expander header: clip any leading icon-font text so only the label shows */
+    [data-testid="stExpander"] summary,
+    .streamlit-expanderHeader,
+    details[data-testid="stExpander"] > summary {
+        list-style: none !important;
+    }
+    [data-testid="stExpander"] summary::-webkit-details-marker,
+    [data-testid="stExpander"] summary::marker {
+        display: none !important;
+        content: "" !important;
+    }
+    /* Any span using the Material Symbols font inside an expander header renders 0-width */
+    [data-testid="stExpander"] summary span[data-testid="stIconMaterial"],
+    [data-testid="stExpander"] summary [class*="material"] {
+        font-size: 0 !important;
+        width: 0 !important;
+        display: none !important;
+    }
+
     /* ═══ FILTER HEADER IN SIDEBAR ═══ */
     .sidebar-title {
         font-size: 0.72rem;
@@ -2646,24 +2671,28 @@ if df is not None and len(df) > 0:
 
     # === TAB 1: OVERVIEW & INSIGHTS ===
     with tab_overview:
-        # About / help — collapsed by default so it stays secondary
-        with st.expander("About this dashboard"):
-            st.markdown("""
-This dashboard summarizes training performance across the Asia region. Use the sidebar filters to
-focus on a market, partner, program, trainer, or period. The title and insights adapt to your selection.
-
-**Key terms**
-- **Training Session** — a unique training event (Training ID, or Country + Date + Program + Trainer)
-- **Unique Learner** — a distinct person trained (counted once regardless of how many sessions they attended)
-- **Learner Attendance** — one attendance record (a learner attending a session)
-- **Stores Reached** — distinct stores in the training data
-- **Pass Rate** — % of valid assessment records marked as passed
-- **Avg Assessment Score** — average valid assessment score
-- **Training Program** — a distinct training name/course
-- **Attach Rate** — average attach rate before vs. after training (30 days post-training)
-
-Full metric definitions are also available in the **Data & Export** tab.
-            """)
+        # About / help — native HTML details to avoid Material icon font fallback issues
+        st.markdown("""
+        <details style="margin-bottom:10px;background:#FFFFFF;border:1px solid #E5E7EB;border-radius:10px;padding:10px 14px;">
+        <summary style="cursor:pointer;font-weight:600;font-size:0.85rem;color:#111827;list-style:none;">About this dashboard</summary>
+        <div style="font-size:0.8rem;color:#374151;margin-top:8px;line-height:1.6;">
+        This dashboard summarizes training performance across the Asia region. Use the sidebar filters to
+        focus on a market, partner, program, trainer, or period. The title and insights adapt to your selection.
+        <br><br>
+        <b>Key terms</b><br>
+        • <b>Training Session</b> — a unique training event (Training ID, or Country + Date + Program + Trainer)<br>
+        • <b>Unique Learner</b> — a distinct person trained (counted once regardless of sessions attended)<br>
+        • <b>Learner Attendance</b> — one attendance record (a learner attending a session)<br>
+        • <b>Stores Reached</b> — distinct stores in the training data<br>
+        • <b>Pass Rate</b> — % of valid assessment records marked as passed<br>
+        • <b>Avg Assessment Score</b> — average valid assessment score<br>
+        • <b>Training Program</b> — a distinct training name/course<br>
+        • <b>Attach Rate</b> — average attach rate before vs. after training (30 days post-training)<br>
+        <br>
+        Full metric definitions are also available in the <b>Data &amp; Export</b> tab.
+        </div>
+        </details>
+        """, unsafe_allow_html=True)
 
         # Determine view level for insights
         _n_countries = df["Country"].nunique() if "Country" in df.columns else 0
@@ -3647,19 +3676,21 @@ Full metric definitions are also available in the **Data & Export** tab.
 
         # ─── METRIC DEFINITIONS ───
         st.markdown("---")
-        with st.expander("Metric Definitions"):
-            st.markdown("""
-| Metric | Definition |
-| --- | --- |
-| **Training Session** | A unique training event — identified by Training ID, or by the combination of Country + Date + Training Program + Trainer when no ID exists. |
-| **Unique Learner** | A distinct individual trained, counted once even if they attended multiple sessions. |
-| **Learner Attendance** | One attendance record — a single learner attending a single session. Multiple attendances can belong to one learner. |
-| **Stores Reached** | The number of distinct stores represented in the training data. |
-| **Pass Rate** | Percentage of valid assessment records marked as passed. |
-| **Avg Assessment Score** | The average of valid assessment scores within the current scope. |
-| **Training Program** | A distinct training name/course. |
-| **Attach Rate** | Average attach rate before and after training, measured 30 days post-training (from Power BI sales data). |
-            """)
+        st.markdown("""
+        <details style="background:#FFFFFF;border:1px solid #E5E7EB;border-radius:10px;padding:10px 14px;">
+        <summary style="cursor:pointer;font-weight:600;font-size:0.85rem;color:#111827;list-style:none;">Metric Definitions</summary>
+        <div style="font-size:0.8rem;color:#374151;margin-top:8px;line-height:1.6;">
+        • <b>Training Session</b> — a unique training event, identified by Training ID, or by Country + Date + Training Program + Trainer when no ID exists.<br>
+        • <b>Unique Learner</b> — a distinct individual trained, counted once even if they attended multiple sessions.<br>
+        • <b>Learner Attendance</b> — one attendance record (a single learner attending a single session). Multiple attendances can belong to one learner.<br>
+        • <b>Stores Reached</b> — the number of distinct stores represented in the training data.<br>
+        • <b>Pass Rate</b> — percentage of valid assessment records marked as passed.<br>
+        • <b>Avg Assessment Score</b> — the average of valid assessment scores within the current scope.<br>
+        • <b>Training Program</b> — a distinct training name/course.<br>
+        • <b>Attach Rate</b> — average attach rate before and after training, measured 30 days post-training (from Power BI sales data).
+        </div>
+        </details>
+        """, unsafe_allow_html=True)
 
 
 # === SIDEBAR: Data Source & Sales (inside expanders below filters) ===
