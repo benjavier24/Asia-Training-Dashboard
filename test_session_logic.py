@@ -465,6 +465,65 @@ def test_score_scaling_needs_attention():
     print("PASS Test SCALE: Needs-attention scores shown as percentage (60%, not 0.6%)")
 
 
+# === PHASE 5 PRODUCTIZATION TESTS ===
+
+def test_p5_prepare_dataframe_consistency():
+    """prepare_dataframe should produce the same metrics as manual normalization."""
+    from app import prepare_dataframe
+    rows = [
+        {"Date of Training": "2026-03-01", "Training Title": "Foundation", "Trainer Name": "Benj Javier",
+         "Partner Name": "Globe", "Training Method": "Online", "Trainee Code": "E1", "Pass Flag": "1"}
+        for _ in range(5)
+    ]
+    raw = pd.DataFrame(rows)
+    prepared = prepare_dataframe(raw)
+    # Columns normalized to canonical names
+    assert "Training Name" in prepared.columns, "Training Title should normalize to Training Name"
+    assert "Trainer" in prepared.columns, "Trainer Name should normalize to Trainer"
+    assert "Account" in prepared.columns, "Partner Name should normalize to Account"
+    # Training Type consolidated (Online -> Virtual/Online)
+    assert (prepared["Training Type"] == "Virtual/Online").all(), "Online should consolidate to Virtual/Online"
+    # Pass Flag coerced to numeric
+    assert pd.api.types.is_numeric_dtype(prepared["Pass Flag"]), "Pass Flag should be numeric"
+    print("PASS Test P5-A: prepare_dataframe normalizes, consolidates, coerces")
+
+
+def test_p5_upload_unsupported_type():
+    """Unsupported file type returns a clear error, not a crash."""
+    from app import load_uploaded_file
+
+    class FakeUpload:
+        name = "report.pdf"
+    data, err = load_uploaded_file(FakeUpload())
+    assert data is None and err is not None, "Should reject unsupported file type"
+    assert "xlsx" in err.lower() or "csv" in err.lower(), f"Error should guide file type. Got: {err}"
+    print("PASS Test P5-B: Unsupported upload type handled gracefully")
+
+
+def test_p5_empty_scope_kpis():
+    """Empty filtered data should not crash compute_kpis."""
+    empty = make_df([{"Date": "2026-03-01", "Training Name": "X", "Trainer": "A", "Pass Flag": 1}]).iloc[0:0]
+    metrics = detect_metrics(empty)
+    # compute_kpis on empty frame should return a dict without raising
+    kpis = compute_kpis(empty, metrics)
+    assert isinstance(kpis, dict), "compute_kpis should return a dict even when empty"
+    print("PASS Test P5-C: Empty scope does not crash KPI computation")
+
+
+def test_p5_single_market_no_comparison():
+    """Single market: session KPI still works; no crash on single-entity scope."""
+    rows = [
+        {"Date": "2026-03-01", "Training Name": "Foundation", "Trainer": "Benj Javier", "Country": "PH", "Pass Flag": 1}
+        for _ in range(5)
+    ]
+    df = make_df(rows)
+    metrics = detect_metrics(df)
+    kpis = compute_kpis(df, metrics)
+    assert df["Country"].nunique() == 1, "Test setup: single market"
+    assert kpis["Total Sessions"] == 1, "Single session expected"
+    print("PASS Test P5-D: Single-market scope handled")
+
+
 def _run_all_tests():
     test_a_repeated_trainee_rows()
     test_b_multiple_sessions_same_week()
@@ -493,6 +552,11 @@ def _run_all_tests():
     test_p41_no_fake_confidence()
     print("--- Phase 4.1 tests passed ---")
     test_score_scaling_needs_attention()
+    print("--- Scaling test passed ---")
+    test_p5_prepare_dataframe_consistency()
+    test_p5_upload_unsupported_type()
+    test_p5_empty_scope_kpis()
+    test_p5_single_market_no_comparison()
     print("\nAll tests passed!")
 
 

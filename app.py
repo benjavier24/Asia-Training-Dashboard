@@ -1,4 +1,5 @@
 import streamlit as st
+import re
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -797,6 +798,48 @@ def load_sales_exports(folder_path):
     if errors:
         status += f" | Errors: {'; '.join(errors)}"
     return combined, status
+
+
+@st.cache_data(show_spinner=False)
+def prepare_dataframe(df):
+    """Normalize, coerce, and clean the raw dataframe once (cached).
+
+    Runs column normalization, Training Type consolidation, numeric coercion,
+    and date parsing. Cached so it doesn't re-run on every filter interaction.
+    Returns a cleaned copy — does NOT change any metric calculation logic.
+    """
+    df = normalize_columns(df.copy())
+
+    # Consolidate inconsistent Training Type values
+    if "Training Type" in df.columns:
+        training_type_map = {
+            "virtual/online": "Virtual/Online",
+            "online": "Virtual/Online",
+            "virtual": "Virtual/Online",
+            "face to face": "Face to Face",
+            "tatap muka/offline": "Face to Face",
+            "tatap muka / offline": "Face to Face",
+            "offline": "Face to Face",
+            "f2f": "Face to Face",
+        }
+        df["Training Type"] = df["Training Type"].apply(
+            lambda x: training_type_map.get(str(x).strip().lower(), x) if pd.notna(x) else x
+        )
+
+    # Coerce numeric columns
+    numeric_cols = ["Pass Flag", "Fail Flag", "Assessment Score", "Attach Rate Before",
+                    "Attach Rate After", "Attach Lift", "Training Hours",
+                    "Total Invited", "Total Attended", "Total Passed"]
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Parse dates
+    if "Date" in df.columns:
+        df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+        df = df.dropna(subset=["Date"])
+
+    return df
 
 
 def detect_metrics(df):
@@ -1895,8 +1938,9 @@ def compute_store_completion(df, duration_days=30, reference_date=None):
     }
 
 
-def render_kpi_card(label, value, delta=None, delta_type="neutral", size="primary", muted=False):
-    """Render a styled KPI card. size='primary' or 'secondary'. muted=True for N/A values."""
+def render_kpi_card(label, value, delta=None, delta_type="neutral", size="primary", muted=False, help_text=None):
+    """Render a styled KPI card. size='primary' or 'secondary'. muted=True for N/A values.
+    help_text adds a native hover tooltip on the label."""
     delta_html = ""
     if delta:
         css_class = delta_type if delta_type in ("positive", "negative") else ""
@@ -1904,9 +1948,12 @@ def render_kpi_card(label, value, delta=None, delta_type="neutral", size="primar
     card_class = "kpi-card" if size == "primary" else "kpi-card-sm"
     if muted:
         card_class += " muted"
+    # Native title attribute for a lightweight hover tooltip
+    title_attr = f' title="{help_text}"' if help_text else ""
+    label_html = f'<div class="kpi-label"{title_attr}>{label}{" ⓘ" if help_text else ""}</div>'
     return f"""
     <div class="{card_class}">
-        <div class="kpi-label">{label}</div>
+        {label_html}
         <div class="kpi-value">{value}</div>
         {delta_html}
     </div>
@@ -1957,24 +2004,42 @@ def load_master_data():
 
 
 def load_uploaded_file(uploaded_file):
-    """Load data from an uploaded file."""
+    """Load data from an uploaded file. Returns (dataframe, error_message).
+
+    Provides clear, user-friendly guidance instead of raw tracebacks.
+    """
     try:
-        if uploaded_file.name.endswith(".csv"):
+        if uploaded_file.name.lower().endswith(".csv"):
             data = pd.read_csv(uploaded_file)
-        else:
+        elif uploaded_file.name.lower().endswith((".xlsx", ".xls")):
             xls = pd.ExcelFile(uploaded_file)
             if "Raw_Data" in xls.sheet_names:
                 data = pd.read_excel(uploaded_file, sheet_name="Raw_Data")
             else:
                 data = pd.read_excel(uploaded_file, sheet_name=0)
+        else:
+            return None, "Unsupported file type. Please upload an .xlsx or .csv file."
+
+        # Empty file check
+        if data is None or len(data) == 0:
+            return None, "The uploaded file has no data rows. Please check the file and try again."
+
+        # Validate that at least some expected training fields are present after normalization
+        normalized = normalize_columns(data.copy())
+        expected_any = ["Date", "Training Name", "Trainer", "Account", "Country", "Store", "Trainee Code", "Trainee Name"]
+        if not any(col in normalized.columns for col in expected_any):
+            return None, ("The uploaded workbook does not contain recognizable training fields "
+                          "(e.g., Date, Training Name, Trainer, Account, Store). "
+                          "Please upload the standard training dashboard file.")
+
         # Fix mixed-type columns that cause Arrow serialization errors
         for col in data.columns:
             if data[col].dtype == object:
-                # Convert object columns to string to avoid mixed-type issues
                 data[col] = data[col].astype(str).replace("nan", pd.NA).replace("None", pd.NA)
         return data, None
     except Exception as e:
-        return None, str(e)
+        # Keep the technical detail out of the user message; return friendly guidance
+        return None, f"Unable to read the uploaded file. Please ensure it is a valid Excel or CSV export. ({type(e).__name__})"
 
 
 # Initialize session state - smart default based on environment
@@ -1989,7 +2054,8 @@ df = None
 data_status = ""
 
 if st.session_state.data_source == "📂 Auto-load Master File":
-    result = load_master_data()
+    with st.spinner("Loading training data..."):
+        result = load_master_data()
     if result[0] is not None:
         df = result[0]
         last_modified = result[1]
@@ -2019,37 +2085,9 @@ with header_col2:
 
 # === MAIN CONTENT WITH SIDEBAR FILTERS ===
 if df is not None and len(df) > 0:
-    df = normalize_columns(df)
+    # Prepare (normalize + coerce + parse dates) — cached for performance
+    df = prepare_dataframe(df)
     metrics = detect_metrics(df)
-
-    # Normalize Training Type values (consolidate inconsistent entries)
-    if "Training Type" in df.columns:
-        training_type_map = {
-            "virtual/online": "Virtual/Online",
-            "online": "Virtual/Online",
-            "virtual": "Virtual/Online",
-            "face to face": "Face to Face",
-            "tatap muka/offline": "Face to Face",
-            "tatap muka / offline": "Face to Face",
-            "offline": "Face to Face",
-            "f2f": "Face to Face",
-        }
-        df["Training Type"] = df["Training Type"].apply(
-            lambda x: training_type_map.get(str(x).strip().lower(), x) if pd.notna(x) else x
-        )
-
-    # Coerce numeric columns upfront to prevent TypeError in all downstream .agg() calls
-    numeric_cols = ["Pass Flag", "Fail Flag", "Assessment Score", "Attach Rate Before",
-                    "Attach Rate After", "Attach Lift", "Training Hours",
-                    "Total Invited", "Total Attended", "Total Passed"]
-    for col in numeric_cols:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    # Parse dates
-    if metrics.get("Date"):
-        df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-        df = df.dropna(subset=["Date"])
 
     # ─── SIDEBAR FILTERS ───
     with st.sidebar:
@@ -2078,7 +2116,9 @@ if df is not None and len(df) > 0:
             selected_preset = st.selectbox(
                 "Date Range",
                 options=list(date_presets.keys()),
-                index=0
+                index=0,
+                key="flt_date",
+                help="Choose a preset period or 'Custom' to pick an exact range."
             )
 
             if selected_preset == "Custom":
@@ -2097,42 +2137,42 @@ if df is not None and len(df) > 0:
         # Country / Market
         if metrics.get("Country") and len(df) > 0:
             country_opts = ["All"] + sorted(df["Country"].dropna().unique().tolist())
-            sel_countries = st.selectbox("Market", options=country_opts, index=0)
+            sel_countries = st.selectbox("Market", options=country_opts, index=0, key="flt_market")
             if sel_countries != "All":
                 df = df[df["Country"] == sel_countries]
 
-        # Account / Partner
+        # Account / Partner (options depend on the market already selected above)
         if metrics.get("Account") and len(df) > 0:
             acct_opts = ["All"] + sorted(df["Account"].dropna().unique().tolist())
-            sel_account = st.selectbox("Account / Partner", options=acct_opts, index=0)
+            sel_account = st.selectbox("Account / Partner", options=acct_opts, index=0, key="flt_account")
             if sel_account != "All":
                 df = df[df["Account"] == sel_account]
 
-        # Training Name
+        # Training Program
         if metrics.get("Training Name") and len(df) > 0:
             training_opts = ["All"] + sorted(df["Training Name"].dropna().unique().tolist())
-            sel_training = st.selectbox("Training Name", options=training_opts, index=0)
+            sel_training = st.selectbox("Training Program", options=training_opts, index=0, key="flt_training")
             if sel_training != "All":
                 df = df[df["Training Name"] == sel_training]
 
         # Trainer
         if metrics.get("Trainer") and len(df) > 0:
             trainer_opts = ["All"] + sorted(df["Trainer"].dropna().unique().tolist())
-            sel_trainer = st.selectbox("Trainer", options=trainer_opts, index=0)
+            sel_trainer = st.selectbox("Trainer", options=trainer_opts, index=0, key="flt_trainer")
             if sel_trainer != "All":
                 df = df[df["Trainer"] == sel_trainer]
 
         # Training Type / Method
         if metrics.get("Training Type") and len(df) > 0:
             type_opts = ["All"] + sorted(df["Training Type"].dropna().unique().tolist())
-            sel_type = st.selectbox("Training Type", options=type_opts, index=0)
+            sel_type = st.selectbox("Training Type", options=type_opts, index=0, key="flt_type")
             if sel_type != "All":
                 df = df[df["Training Type"] == sel_type]
 
         # Store
         if metrics.get("Store") and len(df) > 0:
             store_opts = ["All"] + sorted(df["Store"].dropna().unique().tolist())
-            sel_store = st.selectbox("Store", options=store_opts, index=0)
+            sel_store = st.selectbox("Store", options=store_opts, index=0, key="flt_store")
             if sel_store != "All":
                 df = df[df["Store"] == sel_store]
 
@@ -2144,6 +2184,20 @@ if df is not None and len(df) > 0:
         </div>
         """, unsafe_allow_html=True)
 
+        # Reset Filters — clears all filter selections back to defaults
+        def _reset_filters():
+            for _k in ["flt_date", "flt_market", "flt_account", "flt_training",
+                       "flt_trainer", "flt_type", "flt_store"]:
+                if _k in st.session_state:
+                    del st.session_state[_k]
+        st.button("Reset Filters", use_container_width=True, on_click=_reset_filters,
+                  help="Clear all filters and return to the default regional view.")
+
+
+    # Guard: filters may have removed all rows
+    if len(df) == 0:
+        st.warning("No training records match the current filters. Try widening the date range or clearing some filters.")
+        st.stop()
 
     # Recompute after filtering
     metrics = detect_metrics(df)
@@ -2190,26 +2244,28 @@ if df is not None and len(df) > 0:
     st.markdown(f'<p class="dash-title">{dash_title}</p>', unsafe_allow_html=True)
     st.markdown(f'<p class="dash-subtitle">{dash_subtitle}</p>', unsafe_allow_html=True)
 
-    # ─── COMPACT HEADER CHIPS (replaces hero banner) ───
-    # Summary chips: dynamic context about the current view
-    chips = []
-    if metrics.get("Date") and len(df) > 0:
-        date_min = df["Date"].min().strftime("%b %d")
-        date_max = df["Date"].max().strftime("%b %d, %Y")
-        chips.append(f"{date_min} – {date_max}")
+    # ─── CURRENT VIEW SUMMARY (scope description) ───
+    # A single readable line describing what data the user is looking at.
+    _view_parts = []
+    if _active_market:
+        _view_parts.append(COUNTRY_NAMES.get(_active_market, _active_market))
+    elif metrics.get("Country"):
+        _view_parts.append(f"Asia · {df['Country'].nunique()} Markets")
+    if _active_account:
+        _view_parts.append(_active_account)
+    elif metrics.get("Account"):
+        _view_parts.append(f"{df['Account'].nunique()} Partners")
     if metrics.get("Training Name"):
-        n_programs = df["Training Name"].nunique()
-        chips.append(f"{n_programs} Programs")
-    if metrics.get("Account"):
-        n_accounts = df["Account"].nunique()
-        chips.append(f"{n_accounts} Partners")
-    if metrics.get("Country"):
-        n_countries = df["Country"].nunique()
-        chips.append(f"{n_countries} Markets")
-    chips.append(f"{len(df):,} records")
+        _view_parts.append(f"{df['Training Name'].nunique()} Programs")
+    if metrics.get("Date") and len(df) > 0:
+        _view_parts.append(f"{df['Date'].min().strftime('%b')}–{df['Date'].max().strftime('%b %Y')}")
 
-    chips_html = "".join(f'<span class="chip">{c}</span>' for c in chips)
-    st.markdown(f'<div class="chip-row">{chips_html}</div>', unsafe_allow_html=True)
+    if _view_parts:
+        st.markdown(
+            f'<div style="font-size:0.72rem;color:#6B7280;margin:2px 0 6px;">'
+            f'<span style="font-weight:600;color:#374151;">Viewing:</span> {" · ".join(_view_parts)}</div>',
+            unsafe_allow_html=True
+        )
 
     # Active filter chips — only show meaningful non-default selections
     filter_chips = []
@@ -2260,19 +2316,23 @@ if df is not None and len(df) > 0:
 
     with kpi_col1:
         val = f"{kpis.get('Total Sessions', 0):,}"
-        st.markdown(render_kpi_card("Trainings Done", val, "total sessions conducted"), unsafe_allow_html=True)
+        st.markdown(render_kpi_card("Trainings Done", val, "total sessions conducted",
+                    help_text="Unique training events in the current scope (Training ID, or Date + Program + Trainer)."), unsafe_allow_html=True)
 
     with kpi_col2:
         if kpis.get("_has_unique_learner"):
             val = f"{kpis.get('Unique Learners', 0):,}"
-            st.markdown(render_kpi_card("Unique Learners", val, "distinct individuals"), unsafe_allow_html=True)
+            st.markdown(render_kpi_card("Unique Learners", val, "distinct individuals",
+                        help_text="Distinct learners trained within the current scope (counted once even if they attended multiple sessions)."), unsafe_allow_html=True)
         else:
             val = f"{kpis.get('Total Participants', 0):,}"
-            st.markdown(render_kpi_card("Learner Attendances", val, "total attendance records"), unsafe_allow_html=True)
+            st.markdown(render_kpi_card("Learner Attendances", val, "total attendance records",
+                        help_text="Total attendance records. A unique learner identifier is unavailable, so this counts attendances, not distinct people."), unsafe_allow_html=True)
 
     with kpi_col3:
         stores_val = f"{kpis.get('Stores', 0):,}" if "Stores" in kpis else "N/A"
-        st.markdown(render_kpi_card("Stores Reached", stores_val), unsafe_allow_html=True)
+        st.markdown(render_kpi_card("Stores Reached", stores_val,
+                    help_text="Distinct stores represented in the training data for the current scope."), unsafe_allow_html=True)
 
     with kpi_col4:
         val = f"{kpis.get('Pass Rate', 'N/A')}%" if "Pass Rate" in kpis else "N/A"
@@ -2299,13 +2359,15 @@ if df is not None and len(df) > 0:
             elif "Unique Learners Passed" in kpis:
                 delta = f"{kpis['Unique Learners Passed']:,} unique learners passed"
             # If no unique learner data, don't show a misleading count
-        st.markdown(render_kpi_card("Passing Rate", val, delta, delta_type), unsafe_allow_html=True)
+        st.markdown(render_kpi_card("Passing Rate", val, delta, delta_type,
+                    help_text="Percentage of valid assessment records marked as passed within the current scope."), unsafe_allow_html=True)
 
     with kpi_col5:
         val = f"{kpis.get('Avg Assessment Score', 'N/A')}%" if "Avg Assessment Score" in kpis else "N/A"
         delta_type = "positive" if kpis.get("Avg Assessment Score", 0) >= 75 else "negative" if kpis.get("Avg Assessment Score", 0) < 60 else "neutral"
         delta = "avg assessment score"
-        st.markdown(render_kpi_card("Avg Assessment Score", val, delta, delta_type), unsafe_allow_html=True)
+        st.markdown(render_kpi_card("Avg Assessment Score", val, delta, delta_type,
+                    help_text="Average of valid assessment scores within the current scope."), unsafe_allow_html=True)
 
     # Row 2: Secondary metrics (smaller cards)
     sec_col1, sec_col2, sec_col3, sec_col4, sec_col5 = st.columns(5)
@@ -2584,6 +2646,25 @@ if df is not None and len(df) > 0:
 
     # === TAB 1: OVERVIEW & INSIGHTS ===
     with tab_overview:
+        # About / help — collapsed by default so it stays secondary
+        with st.expander("About this dashboard"):
+            st.markdown("""
+This dashboard summarizes training performance across the Asia region. Use the sidebar filters to
+focus on a market, partner, program, trainer, or period. The title and insights adapt to your selection.
+
+**Key terms**
+- **Training Session** — a unique training event (Training ID, or Country + Date + Program + Trainer)
+- **Unique Learner** — a distinct person trained (counted once regardless of how many sessions they attended)
+- **Learner Attendance** — one attendance record (a learner attending a session)
+- **Stores Reached** — distinct stores in the training data
+- **Pass Rate** — % of valid assessment records marked as passed
+- **Avg Assessment Score** — average valid assessment score
+- **Training Program** — a distinct training name/course
+- **Attach Rate** — average attach rate before vs. after training (30 days post-training)
+
+Full metric definitions are also available in the **Data & Export** tab.
+            """)
+
         # Determine view level for insights
         _n_countries = df["Country"].nunique() if "Country" in df.columns else 0
         if _n_countries > 1:
@@ -2675,8 +2756,15 @@ if df is not None and len(df) > 0:
             "No valid data": "#EF4444",
         }
 
+        # Limit visible history so it doesn't dominate the Overview page
+        _history_reversed = list(reversed(st.session_state.ask_history))
+        _default_visible = 3
+        if "ti_show_all_history" not in st.session_state:
+            st.session_state.ti_show_all_history = False
+        _visible_history = _history_reversed if st.session_state.ti_show_all_history else _history_reversed[:_default_visible]
+
         rerun_target = None
-        for hist_idx, entry in enumerate(reversed(st.session_state.ask_history)):
+        for hist_idx, entry in enumerate(_visible_history):
             real_idx = len(st.session_state.ask_history) - 1 - hist_idx
             orig_ctx = entry.get("context", "")
             is_historical = orig_ctx and orig_ctx != current_ctx
@@ -2732,9 +2820,22 @@ if df is not None and len(df) > 0:
                     rerun_target = entry["question"]
             st.markdown("---")
 
+        # Show More / Show Less history toggle
+        if len(st.session_state.ask_history) > _default_visible:
+            if st.session_state.ti_show_all_history:
+                if st.button("Show less history", key="ti_hist_less"):
+                    st.session_state.ti_show_all_history = False
+                    st.rerun()
+            else:
+                _remaining = len(st.session_state.ask_history) - _default_visible
+                if st.button(f"Show more history ({_remaining} older)", key="ti_hist_more"):
+                    st.session_state.ti_show_all_history = True
+                    st.rerun()
+
         def _store_ti(question_text):
             """Run TI and store the full structured result in history."""
-            result = run_training_intelligence(question_text, df, metrics, kpis)
+            with st.spinner("Preparing Training Intelligence response..."):
+                result = run_training_intelligence(question_text, df, metrics, kpis)
             st.session_state.ask_history.append(result)
 
         if rerun_target:
@@ -3130,6 +3231,17 @@ if df is not None and len(df) > 0:
 
     # === TAB 2: PERFORMANCE ===
     with tab_performance:
+        # If no performance dimensions are available at all, guide the user
+        _has_perf_data = (
+            (metrics.get("Account") and metrics.get("Pass Flag")) or
+            (metrics.get("Trainer") and metrics.get("Pass Flag")) or
+            (metrics.get("Store") and (metrics.get("Pass Flag") or metrics.get("Assessment Score"))) or
+            (metrics.get("Attach Rate Before") and metrics.get("Attach Rate After"))
+        )
+        if not _has_perf_data:
+            st.info("No performance breakdowns are available for the current selection. "
+                    "This view needs account, trainer, or store data with pass rates or assessment scores.")
+
         perf_col1, perf_col2 = st.columns(2)
 
         # Pass Rate by Account
@@ -3408,6 +3520,8 @@ if df is not None and len(df) > 0:
 
     # === TAB 3: TRENDS ===
     with tab_trends:
+        if not metrics.get("Date"):
+            st.info("No date information is available in the current data, so trends over time cannot be shown.")
         if metrics.get("Date"):
             st.markdown('<div class="section-header">Training Volume Over Time</div>', unsafe_allow_html=True)
             # Deduplicate to unique sessions before counting per week
@@ -3477,18 +3591,37 @@ if df is not None and len(df) > 0:
     with tab_data:
         data_col1, data_col2 = st.columns([3, 1])
 
+        # Build a scope-aware, safe filename base
+        _fname_scope = "asia"
+        if _active_account:
+            _fname_scope = str(_active_account)
+        elif _active_market:
+            _fname_scope = COUNTRY_NAMES.get(_active_market, _active_market)
+        # Sanitize: lowercase, spaces/punctuation to underscores, no PII beyond scope name
+        _fname_scope = re.sub(r"[^a-z0-9]+", "_", _fname_scope.lower()).strip("_")
+        _fname_date = datetime.now().strftime("%Y-%m-%d")
+        _fname_base = f"{_fname_scope}_training_dashboard_{_fname_date}"
+
         with data_col1:
             st.markdown('<div class="section-header">Raw Data</div>', unsafe_allow_html=True)
-            st.dataframe(df, use_container_width=True, height=400)
+            st.caption(f"Showing the filtered dataset ({len(df):,} rows). Downloads include the full filtered data.")
+            # Limit on-screen rendering for large datasets; full data still exports
+            _preview_limit = 1000
+            if len(df) > _preview_limit:
+                st.info(f"Displaying the first {_preview_limit:,} of {len(df):,} rows for performance. Use the download buttons for the complete filtered dataset.")
+                st.dataframe(df.head(_preview_limit), use_container_width=True, height=400)
+            else:
+                st.dataframe(df, use_container_width=True, height=400)
 
         with data_col2:
             st.markdown('<div class="section-header">Export</div>', unsafe_allow_html=True)
-            st.download_button("📄 Download CSV", df.to_csv(index=False), "training_data.csv", "text/csv",
+            st.download_button("📄 Download CSV", df.to_csv(index=False), f"{_fname_base}.csv", "text/csv",
                                use_container_width=True)
-            buf = BytesIO()
-            with pd.ExcelWriter(buf, engine="openpyxl") as w:
-                df.to_excel(w, index=False, sheet_name="Data")
-            st.download_button("📊 Download Excel", buf.getvalue(), "training_dashboard.xlsx",
+            with st.spinner("Preparing Excel export..."):
+                buf = BytesIO()
+                with pd.ExcelWriter(buf, engine="openpyxl") as w:
+                    df.to_excel(w, index=False, sheet_name="Data")
+            st.download_button("📊 Download Excel", buf.getvalue(), f"{_fname_base}.xlsx",
                               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                               use_container_width=True)
 
@@ -3511,6 +3644,22 @@ if df is not None and len(df) > 0:
                 st.markdown("")
 
             st.markdown(f"**{len(df):,}** rows · **{len(df.columns)}** columns")
+
+        # ─── METRIC DEFINITIONS ───
+        st.markdown("---")
+        with st.expander("Metric Definitions"):
+            st.markdown("""
+| Metric | Definition |
+| --- | --- |
+| **Training Session** | A unique training event — identified by Training ID, or by the combination of Country + Date + Training Program + Trainer when no ID exists. |
+| **Unique Learner** | A distinct individual trained, counted once even if they attended multiple sessions. |
+| **Learner Attendance** | One attendance record — a single learner attending a single session. Multiple attendances can belong to one learner. |
+| **Stores Reached** | The number of distinct stores represented in the training data. |
+| **Pass Rate** | Percentage of valid assessment records marked as passed. |
+| **Avg Assessment Score** | The average of valid assessment scores within the current scope. |
+| **Training Program** | A distinct training name/course. |
+| **Attach Rate** | Average attach rate before and after training, measured 30 days post-training (from Power BI sales data). |
+            """)
 
 
 # === SIDEBAR: Data Source & Sales (inside expanders below filters) ===
