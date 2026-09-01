@@ -524,6 +524,47 @@ def test_p5_single_market_no_comparison():
     print("PASS Test P5-D: Single-market scope handled")
 
 
+def test_uat_mixed_score_formats():
+    """Mixed assessment-score formats (decimals + percentages) must all normalize to 0-100.
+
+    Reproduces the PH-vs-ID bug: ID scores stored as 0-100, PH scores as 0-1 decimals
+    in the SAME column. After prepare_dataframe, every value should be 0-100.
+    """
+    from app import prepare_dataframe
+    rows = []
+    # ID rows: stored as 0-100 percentages
+    for i in range(10):
+        rows.append({"Date": "2026-03-01", "Training Name": "X", "Trainer": "A", "Country": "ID",
+                     "Account": "Erajaya", "Trainee Code": f"I{i}", "Training Assessment Score %": 80, "Pass Flag": "1"})
+    # PH rows: stored as 0-1 decimals
+    for i in range(10):
+        rows.append({"Date": "2026-03-02", "Training Name": "Y", "Trainer": "B", "Country": "PH",
+                     "Account": "Globe", "Trainee Code": f"P{i}", "Training Assessment Score %": 0.8, "Pass Flag": "1"})
+    raw = pd.DataFrame(rows)
+    prepared = prepare_dataframe(raw)
+
+    # All scores should now be on a 0-100 scale
+    ph_scores = prepared[prepared["Country"] == "PH"]["Assessment Score"]
+    id_scores = prepared[prepared["Country"] == "ID"]["Assessment Score"]
+    assert (ph_scores == 80).all(), f"PH decimals (0.8) should scale to 80. Got {ph_scores.unique()}"
+    assert (id_scores == 80).all(), f"ID percentages (80) should stay 80. Got {id_scores.unique()}"
+    print("PASS Test UAT-A: Mixed score formats normalized to 0-100 per row")
+
+
+def test_uat_ph_account_score_display():
+    """PH account avg score should display ~80%, not 0.8% (the reported bug)."""
+    from app import prepare_dataframe
+    rows = []
+    for i in range(10):
+        rows.append({"Date": "2026-03-02", "Training Name": "Y", "Trainer": "B", "Country": "PH",
+                     "Account": "Globe", "Trainee Code": f"P{i}", "Training Assessment Score %": 0.8, "Pass Flag": "1"})
+    df = prepare_dataframe(pd.DataFrame(rows))
+    # Account-level mean should be 80, not 0.8
+    acct_mean = df.groupby("Account")["Assessment Score"].mean()["Globe"]
+    assert 79 <= acct_mean <= 81, f"Globe account avg score should be ~80%, got {acct_mean}"
+    print("PASS Test UAT-B: PH account score displays as ~80%, not 0.8%")
+
+
 def _run_all_tests():
     test_a_repeated_trainee_rows()
     test_b_multiple_sessions_same_week()
@@ -557,6 +598,9 @@ def _run_all_tests():
     test_p5_upload_unsupported_type()
     test_p5_empty_scope_kpis()
     test_p5_single_market_no_comparison()
+    print("--- Phase 5 tests passed ---")
+    test_uat_mixed_score_formats()
+    test_uat_ph_account_score_display()
     print("\nAll tests passed!")
 
 

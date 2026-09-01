@@ -859,6 +859,21 @@ def prepare_dataframe(df):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
+    # Normalize Assessment Score to a consistent 0–100 percentage scale PER ROW.
+    # The source data mixes formats (some markets store 0–1 decimals, others 0–100).
+    # A per-row rule is the only reliable fix: values <= 1 are decimals → ×100;
+    # values > 1 are already percentages → leave as-is. This makes every
+    # downstream calculation (KPI, account, program, performance, TI) consistent.
+    if "Assessment Score" in df.columns:
+        s = pd.to_numeric(df["Assessment Score"], errors="coerce")
+        df["Assessment Score"] = s.where(s > 1, s * 100)
+
+    # Normalize Attach Rate columns the same way (mixed decimal/percentage possible)
+    for ar_col in ["Attach Rate Before", "Attach Rate After"]:
+        if ar_col in df.columns:
+            s = pd.to_numeric(df[ar_col], errors="coerce")
+            df[ar_col] = s.where(s > 1, s * 100)
+
     # Parse dates
     if "Date" in df.columns:
         df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
@@ -958,10 +973,8 @@ def compute_kpis(df, metrics):
     if metrics.get("Assessment Score"):
         scores = pd.to_numeric(df["Assessment Score"], errors="coerce").dropna()
         if len(scores) > 0:
-            avg = scores.mean()
-            if avg <= 1:
-                avg = avg * 100
-            kpis["Avg Assessment Score"] = round(avg, 1)
+            # Assessment Score is normalized to 0–100 in prepare_dataframe
+            kpis["Avg Assessment Score"] = round(scores.mean(), 1)
 
     if metrics.get("Pass Flag"):
         pass_flags = pd.to_numeric(df["Pass Flag"], errors="coerce")
@@ -997,14 +1010,13 @@ def compute_kpis(df, metrics):
     if metrics.get("Attach Rate Before"):
         vals = pd.to_numeric(df["Attach Rate Before"], errors="coerce").dropna()
         if len(vals) > 0:
-            avg = vals.mean()
-            kpis["Avg Attach Before"] = round(avg * 100 if avg <= 1 else avg, 1)
+            # Attach rates are normalized to 0–100 in prepare_dataframe
+            kpis["Avg Attach Before"] = round(vals.mean(), 1)
 
     if metrics.get("Attach Rate After"):
         vals = pd.to_numeric(df["Attach Rate After"], errors="coerce").dropna()
         if len(vals) > 0:
-            avg = vals.mean()
-            kpis["Avg Attach After"] = round(avg * 100 if avg <= 1 else avg, 1)
+            kpis["Avg Attach After"] = round(vals.mean(), 1)
 
     if "Avg Attach Before" in kpis and "Avg Attach After" in kpis:
         kpis["Attach Improvement"] = round(kpis["Avg Attach After"] - kpis["Avg Attach Before"], 1)
@@ -1081,16 +1093,12 @@ def generate_executive_insights(df, metrics, kpis, view_level="regional", active
         score = kpis["Avg Assessment Score"]
         if view_level == "regional" and metrics.get("Country") and df["Country"].nunique() > 1:
             mkt_scores = df.groupby("Country")["Assessment Score"].mean().dropna().sort_values(ascending=False)
-            if len(mkt_scores) > 0 and mkt_scores.mean() <= 1:
-                mkt_scores = mkt_scores * 100
             if len(mkt_scores) > 1:
                 top_s = mkt_scores.index[0]
                 insights.append(("neutral", f"Highest avg score: {top_s} at {mkt_scores.iloc[0]:.1f}%",
                                  f"Regional average is {score}%."))
         elif view_level == "market" and metrics.get("Account") and df["Account"].nunique() > 1:
             acct_scores = df.groupby("Account")["Assessment Score"].mean().dropna().sort_values(ascending=False)
-            if len(acct_scores) > 0 and acct_scores.mean() <= 1:
-                acct_scores = acct_scores * 100
             if len(acct_scores) > 1:
                 bot_s_acct = acct_scores.index[-1]
                 bot_s_val = acct_scores.iloc[-1]
@@ -1164,10 +1172,7 @@ def generate_needs_attention(df, metrics, kpis, view_level="regional"):
     if metrics.get("Training Name") and metrics.get("Assessment Score") and df["Training Name"].nunique() > 1:
         prog_scores = df.groupby("Training Name")["Assessment Score"].mean().dropna().sort_values()
         # Normalize the whole series to a 0-100 percentage scale.
-        # Detect decimal storage by checking the overall mean, not the max
-        # (a single outlier shouldn't flip the scaling for everyone).
-        if len(prog_scores) > 0 and prog_scores.mean() <= 1:
-            prog_scores = prog_scores * 100
+        # Assessment Score is normalized to 0–100 in prepare_dataframe
         overall_avg = kpis.get("Avg Assessment Score", 0)
         for prog, score in prog_scores.items():
             if score < overall_avg - 10 and len(items) < 5:
@@ -1411,9 +1416,7 @@ def run_training_intelligence(question, df, metrics, kpis):
         if "Assessment Score" in subset.columns:
             scores = subset["Assessment Score"].dropna()
             if len(scores) > 0:
-                avg = scores.mean()
-                avg = avg * 100 if avg <= 1 else avg
-                answer_parts.append(f"• Avg Assessment Score: {avg:.1f}%")
+                answer_parts.append(f"• Avg Assessment Score: {scores.mean():.1f}%")
         meta["metric"] = "Multiple"
         meta["aggregation"] = "Summary of key metrics for the selected scope"
         meta["sample_note"] = f"{sessions:,} Training Sessions" + (f" · {learners:,} Unique Learners" if learners else "")
@@ -1495,7 +1498,7 @@ def run_training_intelligence(question, df, metrics, kpis):
                   "Country" if "Country" in subset.columns and subset["Country"].nunique() > 1 else None
             if dim:
                 grouped = subset.groupby(dim)["Assessment Score"].mean().reset_index()
-                grouped["Assessment Score"] = grouped["Assessment Score"].apply(lambda x: x * 100 if x <= 1 else x).round(1)
+                grouped["Assessment Score"] = grouped["Assessment Score"].round(1)
                 grouped = grouped.sort_values("Assessment Score", ascending=is_bottom).head(n)
                 label = "Lowest" if is_bottom else "Top"
                 answer_parts.append(f"**{label} by Avg Assessment Score ({dim}):**")
@@ -1544,8 +1547,7 @@ def run_training_intelligence(question, df, metrics, kpis):
                 if "Assessment Score" in entity_df.columns:
                     scores = entity_df["Assessment Score"].dropna()
                     if len(scores) > 0:
-                        avg = scores.mean()
-                        row_data["avg_score"] = round((avg * 100 if avg <= 1 else avg), 1)
+                        row_data["avg_score"] = round(scores.mean(), 1)
                     else:
                         has_missing = True
                 else:
@@ -1664,12 +1666,10 @@ def run_training_intelligence(question, df, metrics, kpis):
         meta["metric"] = "Average Assessment Score"
         meta["calc_desc"] = CALC_DESCRIPTIONS["Average Assessment Score"]
         if len(scores) > 0:
+            # Assessment Score is normalized to 0–100 in prepare_dataframe
             avg = scores.mean()
-            _score_is_decimal = avg <= 1
-            avg = avg * 100 if _score_is_decimal else avg
-            scores_pct = scores * 100 if _score_is_decimal else scores
             answer_parts.append(f"**Avg Assessment Score: {avg:.1f}%**")
-            supporting.append(f"Min: {scores_pct.min():.0f}% · Max: {scores_pct.max():.0f}% · Median: {scores_pct.median():.0f}%")
+            supporting.append(f"Min: {scores.min():.0f}% · Max: {scores.max():.0f}% · Median: {scores.median():.0f}%")
             supporting.append(f"Assessed: {len(scores):,} records")
             meta["sample_note"] = f"{len(scores):,} assessed records"
         else:
@@ -1794,9 +1794,7 @@ def run_training_intelligence(question, df, metrics, kpis):
         if "Assessment Score" in subset.columns:
             scores = subset["Assessment Score"].dropna()
             if len(scores) > 0:
-                avg = scores.mean()
-                if avg <= 1: avg *= 100
-                answer_parts.append(f"• Avg Assessment Score: {avg:.1f}%")
+                answer_parts.append(f"• Avg Assessment Score: {scores.mean():.1f}%")
             else:
                 answer_parts.append("• Avg Assessment Score: No data")
         answer_parts.append("")
@@ -2270,18 +2268,23 @@ if df is not None and len(df) > 0:
     st.markdown(f'<p class="dash-subtitle">{dash_subtitle}</p>', unsafe_allow_html=True)
 
     # ─── CURRENT VIEW SUMMARY (scope description) ───
+    # Grammatically correct singular/plural helper
+    def _plural(n, singular, plural=None):
+        plural = plural or (singular + "s")
+        return f"{n} {singular if n == 1 else plural}"
+
     # A single readable line describing what data the user is looking at.
     _view_parts = []
     if _active_market:
         _view_parts.append(COUNTRY_NAMES.get(_active_market, _active_market))
     elif metrics.get("Country"):
-        _view_parts.append(f"Asia · {df['Country'].nunique()} Markets")
+        _view_parts.append("Asia · " + _plural(df["Country"].nunique(), "Market"))
     if _active_account:
         _view_parts.append(_active_account)
     elif metrics.get("Account"):
-        _view_parts.append(f"{df['Account'].nunique()} Partners")
+        _view_parts.append(_plural(df["Account"].nunique(), "Partner"))
     if metrics.get("Training Name"):
-        _view_parts.append(f"{df['Training Name'].nunique()} Programs")
+        _view_parts.append(_plural(df["Training Name"].nunique(), "Program"))
     if metrics.get("Date") and len(df) > 0:
         _view_parts.append(f"{df['Date'].min().strftime('%b')}–{df['Date'].max().strftime('%b %Y')}")
 
@@ -2341,7 +2344,7 @@ if df is not None and len(df) > 0:
 
     with kpi_col1:
         val = f"{kpis.get('Total Sessions', 0):,}"
-        st.markdown(render_kpi_card("Trainings Done", val, "total sessions conducted",
+        st.markdown(render_kpi_card("Training Sessions", val, "total sessions conducted",
                     help_text="Unique training events in the current scope (Training ID, or Date + Program + Trainer)."), unsafe_allow_html=True)
 
     with kpi_col2:
@@ -2538,19 +2541,13 @@ if df is not None and len(df) > 0:
         # Format percentages
         if "Pass Rate" in acct_breakdown.columns:
             acct_breakdown["Pass Rate"] = (acct_breakdown["Pass Rate"] * 100).round(1)
+        # Scores/attach rates are already normalized to 0–100 in prepare_dataframe — just round
         if "Avg Score" in acct_breakdown.columns:
-            scores = acct_breakdown["Avg Score"]
-            acct_breakdown["Avg Score"] = (scores * 100 if scores.mean() <= 1 else scores).round(1)
+            acct_breakdown["Avg Score"] = acct_breakdown["Avg Score"].round(1)
         if "AR Before" in acct_breakdown.columns:
-            if acct_breakdown["AR Before"].mean() <= 1:
-                acct_breakdown["AR Before"] = (acct_breakdown["AR Before"] * 100).round(1)
-            else:
-                acct_breakdown["AR Before"] = acct_breakdown["AR Before"].round(1)
+            acct_breakdown["AR Before"] = acct_breakdown["AR Before"].round(1)
         if "AR After" in acct_breakdown.columns:
-            if acct_breakdown["AR After"].mean() <= 1:
-                acct_breakdown["AR After"] = (acct_breakdown["AR After"] * 100).round(1)
-            else:
-                acct_breakdown["AR After"] = acct_breakdown["AR After"].round(1)
+            acct_breakdown["AR After"] = acct_breakdown["AR After"].round(1)
         if "AR Before" in acct_breakdown.columns and "AR After" in acct_breakdown.columns:
             acct_breakdown["AR Lift (pp)"] = (acct_breakdown["AR After"] - acct_breakdown["AR Before"]).round(1)
 
@@ -3081,10 +3078,8 @@ if df is not None and len(df) > 0:
             if "Pass Rate (%)" in training_summary.columns:
                 training_summary["Pass Rate (%)"] = (training_summary["Pass Rate (%)"] * 100).round(1)
             if "Avg Score" in training_summary.columns:
-                scores = training_summary["Avg Score"]
-                if len(scores) > 0 and scores.mean() <= 1:
-                    scores = scores * 100
-                training_summary["Avg Score"] = scores.round(1)
+                # Already normalized to 0–100 in prepare_dataframe
+                training_summary["Avg Score"] = training_summary["Avg Score"].round(1)
 
             # Map Country codes to full market names for display
             if "Country" in training_summary.columns:
@@ -3149,12 +3144,9 @@ if df is not None and len(df) > 0:
                             after=("Attach Rate After", "mean"),
                             n=("Attach Rate Before", "count")
                         ).reset_index()
-                        if attach_grouped["before"].mean() <= 1:
-                            attach_grouped["before"] = (attach_grouped["before"] * 100).round(1)
-                            attach_grouped["after"] = (attach_grouped["after"] * 100).round(1)
-                        else:
-                            attach_grouped["before"] = attach_grouped["before"].round(1)
-                            attach_grouped["after"] = attach_grouped["after"].round(1)
+                        # Attach rates already normalized to 0–100 in prepare_dataframe
+                        attach_grouped["before"] = attach_grouped["before"].round(1)
+                        attach_grouped["after"] = attach_grouped["after"].round(1)
                         attach_grouped["Improvement"] = (attach_grouped["after"] - attach_grouped["before"]).round(1)
                         attach_grouped = attach_grouped.sort_values("Improvement", ascending=False)
 
@@ -3368,12 +3360,9 @@ if df is not None and len(df) > 0:
                         before=("Attach Rate Before", "mean"),
                         after=("Attach Rate After", "mean")
                     ).reset_index()
-                    if attach_data["before"].mean() <= 1:
-                        attach_data["before"] = (attach_data["before"] * 100).round(1)
-                        attach_data["after"] = (attach_data["after"] * 100).round(1)
-                    else:
-                        attach_data["before"] = attach_data["before"].round(1)
-                        attach_data["after"] = attach_data["after"].round(1)
+                    # Attach rates already normalized to 0–100 in prepare_dataframe
+                    attach_data["before"] = attach_data["before"].round(1)
+                    attach_data["after"] = attach_data["after"].round(1)
                     attach_data["Improvement"] = (attach_data["after"] - attach_data["before"]).round(1)
                     attach_data = attach_data.sort_values("Improvement", ascending=False)
 
@@ -3419,18 +3408,13 @@ if df is not None and len(df) > 0:
 
                 if "Pass Rate" in store_data.columns:
                     store_data["Pass Rate"] = (store_data["Pass Rate"] * 100).round(1)
+                # Scores/attach rates already normalized to 0–100 — just round
                 if "Avg Score" in store_data.columns:
-                    scores = store_data["Avg Score"]
-                    store_data["Avg Score"] = (scores * 100 if scores.mean() <= 1 else scores).round(1)
+                    store_data["Avg Score"] = store_data["Avg Score"].round(1)
                 if "Attach Before" in store_data.columns:
-                    if store_data["Attach Before"].mean() <= 1:
-                        store_data["Attach Before"] = (store_data["Attach Before"] * 100).round(1)
-                        if "Attach After" in store_data.columns:
-                            store_data["Attach After"] = (store_data["Attach After"] * 100).round(1)
-                    else:
-                        store_data["Attach Before"] = store_data["Attach Before"].round(1)
-                        if "Attach After" in store_data.columns:
-                            store_data["Attach After"] = store_data["Attach After"].round(1)
+                    store_data["Attach Before"] = store_data["Attach Before"].round(1)
+                if "Attach After" in store_data.columns:
+                    store_data["Attach After"] = store_data["Attach After"].round(1)
                 if "Attach Before" in store_data.columns and "Attach After" in store_data.columns:
                     store_data["Improvement (pp)"] = (store_data["Attach After"] - store_data["Attach Before"]).round(1)
 
