@@ -8,6 +8,13 @@ import numpy as np
 from datetime import datetime
 from thefuzz import fuzz, process
 
+# === BUSINESS RULES ===
+# Passing standard: a learner passes the assessment if their normalized
+# Assessment Score is >= this threshold. Applied uniformly across ALL markets
+# so "pass" means the same thing everywhere, regardless of the (inconsistent)
+# Pass Flag values in the source data. See prepare_dataframe().
+PASS_THRESHOLD = 70
+
 # Page config
 st.set_page_config(
     page_title="Asia Training Dashboard",
@@ -868,6 +875,21 @@ def prepare_dataframe(df):
         s = pd.to_numeric(df["Assessment Score"], errors="coerce")
         df["Assessment Score"] = s.where(s > 1, s * 100)
 
+    # Derive Pass Flag from the normalized Assessment Score using the uniform
+    # PASS_THRESHOLD (default 70%). This is the single source of truth for
+    # pass/fail across all markets and overrides any Pass Flag in the source,
+    # which is known to be inconsistent (e.g. records flagged "pass" with very
+    # low scores). Rows with NO assessment score keep a NaN Pass Flag so they
+    # are EXCLUDED from pass-rate calculations (option B: only score learners
+    # who were actually assessed) rather than being counted as fails.
+    if "Assessment Score" in df.columns:
+        score = pd.to_numeric(df["Assessment Score"], errors="coerce")
+        derived_pass = (score >= PASS_THRESHOLD).astype(float)
+        derived_pass[score.isna()] = np.nan  # no score → excluded, not a fail
+        df["Pass Flag"] = derived_pass
+        # Keep Fail Flag consistent as the logical inverse (NaN stays NaN)
+        df["Fail Flag"] = np.where(score.isna(), np.nan, 1.0 - derived_pass)
+
     # Normalize Attach Rate columns the same way (mixed decimal/percentage possible)
     for ar_col in ["Attach Rate Before", "Attach Rate After"]:
         if ar_col in df.columns:
@@ -1344,7 +1366,7 @@ def run_training_intelligence(question, df, metrics, kpis):
 
     # Calculation descriptions (user-facing, no code/internals)
     CALC_DESCRIPTIONS = {
-        "Pass Rate": "Percentage of valid passing assessment records within the selected scope.",
+        "Pass Rate": f"Percentage of assessed learners who scored {PASS_THRESHOLD}% or higher (the passing standard applied uniformly across all markets). Learners with no assessment score are excluded, not counted as fails.",
         "Training Sessions": "Count of unique training sessions using Training ID when available, otherwise the approved session key (Country + Date + Training Name + Trainer).",
         "Unique Learners": "Count of distinct trainee identifiers within the selected scope.",
         "Learner Attendances": "Total attendance records (one row per learner per session) in the selected scope.",
@@ -2388,7 +2410,7 @@ if df is not None and len(df) > 0:
                 delta = f"{kpis['Unique Learners Passed']:,} unique learners passed"
             # If no unique learner data, don't show a misleading count
         st.markdown(render_kpi_card("Passing Rate", val, delta, delta_type,
-                    help_text="Percentage of valid assessment records marked as passed within the current scope."), unsafe_allow_html=True)
+                    help_text=f"Percentage of assessed learners scoring {PASS_THRESHOLD}% or higher (uniform passing standard). Learners with no assessment score are excluded, not counted as fails."), unsafe_allow_html=True)
 
     with kpi_col5:
         val = f"{kpis.get('Avg Assessment Score', 'N/A')}%" if "Avg Assessment Score" in kpis else "N/A"
@@ -2681,7 +2703,7 @@ if df is not None and len(df) > 0:
         • <b>Unique Learner</b> — a distinct person trained (counted once regardless of sessions attended)<br>
         • <b>Learner Attendance</b> — one attendance record (a learner attending a session)<br>
         • <b>Stores Reached</b> — distinct stores in the training data<br>
-        • <b>Pass Rate</b> — % of valid assessment records marked as passed<br>
+        • <b>Pass Rate</b> — % of assessed learners scoring 70% or higher (uniform passing standard; learners with no score are excluded, not failed)<br>
         • <b>Avg Assessment Score</b> — average valid assessment score<br>
         • <b>Training Program</b> — a distinct training name/course<br>
         • <b>Attach Rate</b> — average attach rate before vs. after training (30 days post-training)<br>
@@ -3668,7 +3690,7 @@ if df is not None and len(df) > 0:
         • <b>Unique Learner</b> — a distinct individual trained, counted once even if they attended multiple sessions.<br>
         • <b>Learner Attendance</b> — one attendance record (a single learner attending a single session). Multiple attendances can belong to one learner.<br>
         • <b>Stores Reached</b> — the number of distinct stores represented in the training data.<br>
-        • <b>Pass Rate</b> — percentage of valid assessment records marked as passed.<br>
+        • <b>Pass Rate</b> — percentage of assessed learners who scored 70% or higher. The 70% passing standard is applied uniformly across all markets, derived from each learner's assessment score rather than source pass/fail flags. Learners with no assessment score are excluded from the calculation (not counted as fails).<br>
         • <b>Avg Assessment Score</b> — the average of valid assessment scores within the current scope.<br>
         • <b>Training Program</b> — a distinct training name/course.<br>
         • <b>Attach Rate</b> — average attach rate before and after training, measured 30 days post-training (from Power BI sales data).

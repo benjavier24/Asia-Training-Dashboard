@@ -565,6 +565,109 @@ def test_uat_ph_account_score_display():
     print("PASS Test UAT-B: PH account score displays as ~80%, not 0.8%")
 
 
+# === 70% PASSING STANDARD TESTS ===
+
+def test_threshold_derives_pass_flag_from_score():
+    """Pass Flag must be derived from score >= 70, overriding any source flag."""
+    from app import prepare_dataframe, PASS_THRESHOLD
+    assert PASS_THRESHOLD == 70, f"Passing standard should be 70, got {PASS_THRESHOLD}"
+    rows = [
+        # score 69 with source Pass Flag=1 -> must become FAIL (below 70)
+        {"Date of Training": "2026-03-01", "Training Title": "X", "Trainer Name": "A",
+         "Trainee Code": "E1", "Training Assessment Score %": 69, "Pass Flag": 1},
+        # score 70 with source Pass Flag=0 -> must become PASS (at threshold)
+        {"Date of Training": "2026-03-01", "Training Title": "X", "Trainer Name": "A",
+         "Trainee Code": "E2", "Training Assessment Score %": 70, "Pass Flag": 0},
+        # score 95 -> PASS
+        {"Date of Training": "2026-03-01", "Training Title": "X", "Trainer Name": "A",
+         "Trainee Code": "E3", "Training Assessment Score %": 95, "Pass Flag": 0},
+    ]
+    df = prepare_dataframe(pd.DataFrame(rows))
+    flags = df.sort_values("Trainee Code")["Pass Flag"].tolist()
+    assert flags == [0.0, 1.0, 1.0], f"Expected [fail, pass, pass] by score >=70, got {flags}"
+    print("PASS Test THR-A: Pass Flag derived from score >= 70 (overrides source flag)")
+
+
+def test_threshold_decimal_scores_scaled_before_threshold():
+    """Decimal scores (0-1) are scaled to 0-100 BEFORE the 70% test is applied."""
+    from app import prepare_dataframe
+    rows = [
+        # 0.72 -> 72 -> PASS
+        {"Date of Training": "2026-03-01", "Training Title": "Y", "Trainer Name": "B",
+         "Trainee Code": "P1", "Training Assessment Score %": 0.72, "Pass Flag": 0},
+        # 0.65 -> 65 -> FAIL
+        {"Date of Training": "2026-03-01", "Training Title": "Y", "Trainer Name": "B",
+         "Trainee Code": "P2", "Training Assessment Score %": 0.65, "Pass Flag": 1},
+    ]
+    df = prepare_dataframe(pd.DataFrame(rows))
+    flags = df.sort_values("Trainee Code")["Pass Flag"].tolist()
+    assert flags == [1.0, 0.0], f"Expected [pass(0.72->72), fail(0.65->65)], got {flags}"
+    print("PASS Test THR-B: Decimal scores scaled before applying 70% threshold")
+
+
+def test_threshold_blank_score_excluded_not_failed():
+    """Option B: rows with no score are EXCLUDED from pass rate, not counted as fails."""
+    from app import prepare_dataframe, compute_kpis, detect_metrics
+    rows = [
+        # 2 assessed: one pass (80), one fail (50)
+        {"Date of Training": "2026-03-01", "Training Title": "Z", "Trainer Name": "C",
+         "Trainee Code": "A1", "Training Assessment Score %": 80, "Pass Flag": 1},
+        {"Date of Training": "2026-03-01", "Training Title": "Z", "Trainer Name": "C",
+         "Trainee Code": "A2", "Training Assessment Score %": 50, "Pass Flag": 1},
+        # 2 with NO score -> must be excluded from pass rate entirely
+        {"Date of Training": "2026-03-01", "Training Title": "Z", "Trainer Name": "C",
+         "Trainee Code": "A3", "Training Assessment Score %": None, "Pass Flag": 1},
+        {"Date of Training": "2026-03-01", "Training Title": "Z", "Trainer Name": "C",
+         "Trainee Code": "A4", "Training Assessment Score %": None, "Pass Flag": 0},
+    ]
+    df = prepare_dataframe(pd.DataFrame(rows))
+    metrics = detect_metrics(df)
+    kpis = compute_kpis(df, metrics)
+    # Pass rate = 1 pass / 2 assessed = 50%, NOT 1/4 (25%) which would treat blanks as fails
+    assert kpis["Pass Rate"] == 50.0, f"Expected 50% (1 of 2 assessed), got {kpis['Pass Rate']}"
+    # Blank-score rows must have NaN Pass Flag (excluded)
+    blanks = df[df["Assessment Score"].isna()]["Pass Flag"]
+    assert blanks.isna().all(), f"Blank-score rows must have NaN Pass Flag, got {blanks.tolist()}"
+    print("PASS Test THR-C: Blank scores excluded from pass rate (option B), not failed")
+
+
+def test_threshold_fail_flag_is_inverse():
+    """Fail Flag must be the logical inverse of Pass Flag, with NaN preserved."""
+    from app import prepare_dataframe
+    rows = [
+        {"Date of Training": "2026-03-01", "Training Title": "W", "Trainer Name": "D",
+         "Trainee Code": "F1", "Training Assessment Score %": 90, "Pass Flag": 1},   # pass
+        {"Date of Training": "2026-03-01", "Training Title": "W", "Trainer Name": "D",
+         "Trainee Code": "F2", "Training Assessment Score %": 40, "Pass Flag": 1},   # fail
+        {"Date of Training": "2026-03-01", "Training Title": "W", "Trainer Name": "D",
+         "Trainee Code": "F3", "Training Assessment Score %": None, "Pass Flag": 1},  # excluded
+    ]
+    df = prepare_dataframe(pd.DataFrame(rows)).sort_values("Trainee Code")
+    pass_flags = df["Pass Flag"].tolist()
+    fail_flags = df["Fail Flag"].tolist()
+    assert pass_flags[0] == 1.0 and fail_flags[0] == 0.0, "Pass row: Pass=1, Fail=0"
+    assert pass_flags[1] == 0.0 and fail_flags[1] == 1.0, "Fail row: Pass=0, Fail=1"
+    assert pd.isna(pass_flags[2]) and pd.isna(fail_flags[2]), "Blank row: both NaN"
+    print("PASS Test THR-D: Fail Flag is inverse of Pass Flag (NaN preserved)")
+
+
+def test_threshold_inconsistent_source_flags_corrected():
+    """Source flags that contradict scores (e.g. Harmony 79% 'pass' at 19 avg) are corrected."""
+    from app import prepare_dataframe, compute_kpis, detect_metrics
+    # Mimic the Harmony anomaly: high source pass rate but very low scores
+    rows = []
+    for i in range(10):
+        # All flagged pass in source, but all score ~19 (well below 70)
+        rows.append({"Date of Training": "2026-03-01", "Training Title": "H", "Trainer Name": "E",
+                     "Trainee Code": f"H{i}", "Training Assessment Score %": 19, "Pass Flag": 1})
+    df = prepare_dataframe(pd.DataFrame(rows))
+    metrics = detect_metrics(df)
+    kpis = compute_kpis(df, metrics)
+    # Despite source flags all=1, real pass rate must be 0% (no one scored >=70)
+    assert kpis["Pass Rate"] == 0.0, f"Expected 0% (all scored 19), got {kpis['Pass Rate']}"
+    print("PASS Test THR-E: Contradictory source flags corrected to score-based truth")
+
+
 def _run_all_tests():
     test_a_repeated_trainee_rows()
     test_b_multiple_sessions_same_week()
@@ -601,6 +704,13 @@ def _run_all_tests():
     print("--- Phase 5 tests passed ---")
     test_uat_mixed_score_formats()
     test_uat_ph_account_score_display()
+    print("--- UAT display tests passed ---")
+    test_threshold_derives_pass_flag_from_score()
+    test_threshold_decimal_scores_scaled_before_threshold()
+    test_threshold_blank_score_excluded_not_failed()
+    test_threshold_fail_flag_is_inverse()
+    test_threshold_inconsistent_source_flags_corrected()
+    print("--- 70% passing standard tests passed ---")
     print("\nAll tests passed!")
 
 
