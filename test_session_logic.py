@@ -472,7 +472,8 @@ def test_p5_prepare_dataframe_consistency():
     from app import prepare_dataframe
     rows = [
         {"Date of Training": "2026-03-01", "Training Title": "Foundation", "Trainer Name": "Benj Javier",
-         "Partner Name": "Globe", "Training Method": "Online", "Trainee Code": "E1", "Pass Flag": "1"}
+         "Partner Name": "Globe", "Training Type": "Foundation", "Training Method": "Online",
+         "Trainee Code": "E1", "Pass Flag": "1"}
         for _ in range(5)
     ]
     raw = pd.DataFrame(rows)
@@ -481,8 +482,9 @@ def test_p5_prepare_dataframe_consistency():
     assert "Training Name" in prepared.columns, "Training Title should normalize to Training Name"
     assert "Trainer" in prepared.columns, "Trainer Name should normalize to Trainer"
     assert "Account" in prepared.columns, "Partner Name should normalize to Account"
-    # Training Type consolidated (Online -> Virtual/Online)
-    assert (prepared["Training Type"] == "Virtual/Online").all(), "Online should consolidate to Virtual/Online"
+    # Training Type (phase) preserved; delivery mode consolidated separately
+    assert (prepared["Training Type"] == "Foundation").all(), "Foundation phase should stay in Training Type"
+    assert (prepared["Training Method"] == "Virtual/Online").all(), "Online should consolidate to Virtual/Online in Training Method"
     # Pass Flag coerced to numeric
     assert pd.api.types.is_numeric_dtype(prepared["Pass Flag"]), "Pass Flag should be numeric"
     print("PASS Test P5-A: prepare_dataframe normalizes, consolidates, coerces")
@@ -668,6 +670,96 @@ def test_threshold_inconsistent_source_flags_corrected():
     print("PASS Test THR-E: Contradictory source flags corrected to score-based truth")
 
 
+# === TIERED THRESHOLD TESTS (Foundation 70 / Activation & Reinforcement 80) ===
+
+def test_tiered_threshold_map():
+    """The per-type threshold lookup returns the correct tier and defaults to 70."""
+    from app import pass_threshold_for_type, PASS_THRESHOLDS_BY_TYPE, PASS_THRESHOLD
+    assert PASS_THRESHOLDS_BY_TYPE.get("foundation") == 70
+    assert PASS_THRESHOLDS_BY_TYPE.get("activation") == 80
+    assert PASS_THRESHOLDS_BY_TYPE.get("reinforcement") == 80
+    assert pass_threshold_for_type("Foundation") == 70
+    assert pass_threshold_for_type("Activation") == 80
+    assert pass_threshold_for_type("Reinforcement") == 80
+    assert pass_threshold_for_type("  reINForcement ") == 80   # case/space tolerant
+    assert pass_threshold_for_type(None) == PASS_THRESHOLD      # missing -> 70
+    assert pass_threshold_for_type("") == PASS_THRESHOLD        # blank -> 70
+    assert pass_threshold_for_type("Champion") == PASS_THRESHOLD  # unknown -> 70
+    print("PASS Test TIER-A: Per-type threshold map (F=70, A/R=80, default 70)")
+
+
+def test_tiered_foundation_vs_activation_at_75():
+    """A score of 75 passes Foundation (>=70) but FAILS Activation (needs >=80)."""
+    from app import prepare_dataframe
+    rows = [
+        {"Date of Training": "2026-03-01", "Training Title": "F", "Trainer Name": "T",
+         "Training Type": "Foundation", "Trainee Code": "F75",
+         "Training Assessment Score %": 75, "Pass Flag": 0},
+        {"Date of Training": "2026-03-01", "Training Title": "A", "Trainer Name": "T",
+         "Training Type": "Activation", "Trainee Code": "A75",
+         "Training Assessment Score %": 75, "Pass Flag": 1},
+        {"Date of Training": "2026-03-01", "Training Title": "R", "Trainer Name": "T",
+         "Training Type": "Reinforcement", "Trainee Code": "R75",
+         "Training Assessment Score %": 75, "Pass Flag": 1},
+    ]
+    df = prepare_dataframe(pd.DataFrame(rows)).set_index("Trainee Code")
+    assert df.loc["F75", "Pass Flag"] == 1.0, "Foundation 75 should PASS (>=70)"
+    assert df.loc["A75", "Pass Flag"] == 0.0, "Activation 75 should FAIL (needs >=80)"
+    assert df.loc["R75", "Pass Flag"] == 0.0, "Reinforcement 75 should FAIL (needs >=80)"
+    print("PASS Test TIER-B: Score 75 passes Foundation but fails Activation/Reinforcement")
+
+
+def test_tiered_activation_80_passes():
+    """A score of exactly 80 passes Activation/Reinforcement (>= threshold)."""
+    from app import prepare_dataframe
+    rows = [
+        {"Date of Training": "2026-03-01", "Training Title": "A", "Trainer Name": "T",
+         "Training Type": "Activation", "Trainee Code": "A80",
+         "Training Assessment Score %": 80, "Pass Flag": 0},
+        {"Date of Training": "2026-03-01", "Training Title": "R", "Trainer Name": "T",
+         "Training Type": "Reinforcement", "Trainee Code": "R79",
+         "Training Assessment Score %": 79, "Pass Flag": 1},
+    ]
+    df = prepare_dataframe(pd.DataFrame(rows)).set_index("Trainee Code")
+    assert df.loc["A80", "Pass Flag"] == 1.0, "Activation 80 should PASS (at threshold)"
+    assert df.loc["R79", "Pass Flag"] == 0.0, "Reinforcement 79 should FAIL (below 80)"
+    print("PASS Test TIER-C: Score 80 passes Activation; 79 fails Reinforcement")
+
+
+def test_tiered_blank_type_defaults_to_70():
+    """Rows with a blank/missing training type use the 70% default."""
+    from app import prepare_dataframe
+    rows = [
+        {"Date of Training": "2026-03-01", "Training Title": "X", "Trainer Name": "T",
+         "Training Type": None, "Trainee Code": "B72",
+         "Training Assessment Score %": 72, "Pass Flag": 0},
+        {"Date of Training": "2026-03-01", "Training Title": "X", "Trainer Name": "T",
+         "Training Type": None, "Trainee Code": "B69",
+         "Training Assessment Score %": 69, "Pass Flag": 1},
+    ]
+    df = prepare_dataframe(pd.DataFrame(rows)).set_index("Trainee Code")
+    assert df.loc["B72", "Pass Flag"] == 1.0, "Blank type, 72 should PASS (default 70)"
+    assert df.loc["B69", "Pass Flag"] == 0.0, "Blank type, 69 should FAIL (default 70)"
+    print("PASS Test TIER-D: Blank training type defaults to 70% standard")
+
+
+def test_tiered_training_type_vs_method_separation():
+    """Training phase and delivery method are kept in separate columns."""
+    from app import prepare_dataframe
+    # Source has both a phase column and a delivery-method column
+    rows = [{
+        "Date of Training": "2026-03-01", "Training Title": "X", "Trainer Name": "T",
+        "Trainee Code": "S1", "Training Assessment Score %": 90,
+        "Training Type (Foundation, Activation, Reinforcement)": "Activation",
+        "Training Method": "Face to Face",
+    }]
+    df = prepare_dataframe(pd.DataFrame(rows))
+    assert df["Training Type"].iloc[0] == "Activation", "Phase must map to Training Type"
+    assert "Training Method" in df.columns and df["Training Method"].iloc[0] == "Face to Face", \
+        "Delivery mode must stay in Training Method, not hijack Training Type"
+    print("PASS Test TIER-E: Training Type (phase) and Training Method (mode) kept separate")
+
+
 def _run_all_tests():
     test_a_repeated_trainee_rows()
     test_b_multiple_sessions_same_week()
@@ -710,7 +802,13 @@ def _run_all_tests():
     test_threshold_blank_score_excluded_not_failed()
     test_threshold_fail_flag_is_inverse()
     test_threshold_inconsistent_source_flags_corrected()
-    print("--- 70% passing standard tests passed ---")
+    print("--- base passing standard tests passed ---")
+    test_tiered_threshold_map()
+    test_tiered_foundation_vs_activation_at_75()
+    test_tiered_activation_80_passes()
+    test_tiered_blank_type_defaults_to_70()
+    test_tiered_training_type_vs_method_separation()
+    print("--- tiered passing standard tests passed ---")
     print("\nAll tests passed!")
 
 

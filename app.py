@@ -10,10 +10,38 @@ from thefuzz import fuzz, process
 
 # === BUSINESS RULES ===
 # Passing standard: a learner passes the assessment if their normalized
-# Assessment Score is >= this threshold. Applied uniformly across ALL markets
-# so "pass" means the same thing everywhere, regardless of the (inconsistent)
-# Pass Flag values in the source data. See prepare_dataframe().
+# Assessment Score meets the threshold for their training type. The bar is
+# tiered by training phase — foundational trainings pass at 70%, while
+# activation/reinforcement trainings (follow-on, learners already know the
+# material) require 80%. Applied uniformly across ALL markets so "pass" means
+# the same thing everywhere, regardless of the (inconsistent) Pass Flag values
+# in the source data. See prepare_dataframe() and pass_threshold_for_type().
+
+# Base standard, also used as the default when training type is missing/unknown.
 PASS_THRESHOLD = 70
+
+# Per-training-type passing thresholds. Keys are compared case-insensitively.
+# Any type not listed here (including blank/unspecified) falls back to
+# PASS_THRESHOLD (70). NOTE: a large share of source rows currently have a
+# blank training type; those default to 70 until the raw data is cleaned up,
+# at which point they will automatically pick up their correct tier with no
+# code change (the rule reads the training-type column at load time).
+PASS_THRESHOLDS_BY_TYPE = {
+    "foundation": 70,
+    "activation": 80,
+    "reinforcement": 80,
+}
+
+
+def pass_threshold_for_type(training_type):
+    """Return the passing threshold (%) for a given training type.
+
+    Falls back to PASS_THRESHOLD (70) for blank/unknown types.
+    """
+    if training_type is None:
+        return PASS_THRESHOLD
+    key = str(training_type).strip().lower()
+    return PASS_THRESHOLDS_BY_TYPE.get(key, PASS_THRESHOLD)
 
 # Page config
 st.set_page_config(
@@ -531,8 +559,14 @@ COLUMN_ALIASES = {
     "store": "Store", "store name": "Store", "branch": "Store", "location": "Store", "outlet": "Store",
     "training name": "Training Name", "training title": "Training Name", "course": "Training Name",
     "program": "Training Name", "module": "Training Name",
-    "training type": "Training Type", "training method": "Training Type", "type": "Training Type",
-    "method": "Training Type", "delivery mode": "Training Type",
+    # Training phase → canonical "Training Type" (Foundation / Activation / Reinforcement).
+    # The source header includes a parenthetical, so map that exact form too.
+    "training type": "Training Type", "type": "Training Type",
+    "training type (foundation, activation, reinforcement)": "Training Type",
+    "training phase": "Training Type", "phase": "Training Type",
+    # Delivery mode → separate canonical "Training Method" (Face to Face / E-Learning / etc.).
+    # Kept distinct from Training Type so the tiered passing thresholds read the phase, not the mode.
+    "training method": "Training Method", "method": "Training Method", "delivery mode": "Training Method",
     "training id": "Training ID", "session id": "Training ID",
     "trainee name": "Trainee Name", "participant": "Trainee Name", "learner": "Trainee Name",
     "trainee code": "Trainee Code", "employee id": "Trainee Code",
@@ -842,20 +876,36 @@ def prepare_dataframe(df):
     """
     df = normalize_columns(df.copy())
 
-    # Consolidate inconsistent Training Type values
+    # Consolidate inconsistent Training Type (phase) values into the canonical
+    # Foundation / Activation / Reinforcement labels (case/whitespace tolerant).
     if "Training Type" in df.columns:
         training_type_map = {
+            "foundation": "Foundation",
+            "activation": "Activation",
+            "reinforcement": "Reinforcement",
+            "reinforcements": "Reinforcement",
+            "champion": "Champion",
+        }
+        df["Training Type"] = df["Training Type"].apply(
+            lambda x: training_type_map.get(str(x).strip().lower(), x) if pd.notna(x) else x
+        )
+
+    # Consolidate inconsistent Training Method (delivery mode) values.
+    if "Training Method" in df.columns:
+        training_method_map = {
             "virtual/online": "Virtual/Online",
             "online": "Virtual/Online",
             "virtual": "Virtual/Online",
+            "e-learning": "E-Learning",
+            "elearning": "E-Learning",
             "face to face": "Face to Face",
             "tatap muka/offline": "Face to Face",
             "tatap muka / offline": "Face to Face",
             "offline": "Face to Face",
             "f2f": "Face to Face",
         }
-        df["Training Type"] = df["Training Type"].apply(
-            lambda x: training_type_map.get(str(x).strip().lower(), x) if pd.notna(x) else x
+        df["Training Method"] = df["Training Method"].apply(
+            lambda x: training_method_map.get(str(x).strip().lower(), x) if pd.notna(x) else x
         )
 
     # Coerce numeric columns
@@ -875,16 +925,24 @@ def prepare_dataframe(df):
         s = pd.to_numeric(df["Assessment Score"], errors="coerce")
         df["Assessment Score"] = s.where(s > 1, s * 100)
 
-    # Derive Pass Flag from the normalized Assessment Score using the uniform
-    # PASS_THRESHOLD (default 70%). This is the single source of truth for
-    # pass/fail across all markets and overrides any Pass Flag in the source,
-    # which is known to be inconsistent (e.g. records flagged "pass" with very
-    # low scores). Rows with NO assessment score keep a NaN Pass Flag so they
-    # are EXCLUDED from pass-rate calculations (option B: only score learners
-    # who were actually assessed) rather than being counted as fails.
+    # Derive Pass Flag from the normalized Assessment Score using the TIERED
+    # passing standard: the threshold depends on the training type (Foundation
+    # = 70%, Activation/Reinforcement = 80%; blank/unknown types fall back to
+    # PASS_THRESHOLD = 70). This is the single source of truth for pass/fail
+    # across all markets and overrides any Pass Flag in the source, which is
+    # known to be inconsistent (e.g. records flagged "pass" with very low
+    # scores). Rows with NO assessment score keep a NaN Pass Flag so they are
+    # EXCLUDED from pass-rate calculations (option B: only score learners who
+    # were actually assessed) rather than being counted as fails.
     if "Assessment Score" in df.columns:
         score = pd.to_numeric(df["Assessment Score"], errors="coerce")
-        derived_pass = (score >= PASS_THRESHOLD).astype(float)
+        # Per-row threshold from the training type (defaults to 70 when the
+        # Training Type column is missing or the value is blank/unknown).
+        if "Training Type" in df.columns:
+            thresholds = df["Training Type"].apply(pass_threshold_for_type)
+        else:
+            thresholds = pd.Series(PASS_THRESHOLD, index=df.index)
+        derived_pass = (score >= thresholds).astype(float)
         derived_pass[score.isna()] = np.nan  # no score → excluded, not a fail
         df["Pass Flag"] = derived_pass
         # Keep Fail Flag consistent as the logical inverse (NaN stays NaN)
@@ -1366,7 +1424,7 @@ def run_training_intelligence(question, df, metrics, kpis):
 
     # Calculation descriptions (user-facing, no code/internals)
     CALC_DESCRIPTIONS = {
-        "Pass Rate": f"Percentage of assessed learners who scored {PASS_THRESHOLD}% or higher (the passing standard applied uniformly across all markets). Learners with no assessment score are excluded, not counted as fails.",
+        "Pass Rate": "Percentage of assessed learners who met the passing standard for their training type (Foundation 70%; Activation and Reinforcement 80%; unspecified types default to 70%). Applied uniformly across all markets. Learners with no assessment score are excluded, not counted as fails.",
         "Training Sessions": "Count of unique training sessions using Training ID when available, otherwise the approved session key (Country + Date + Training Name + Trainer).",
         "Unique Learners": "Count of distinct trainee identifiers within the selected scope.",
         "Learner Attendances": "Total attendance records (one row per learner per session) in the selected scope.",
@@ -2410,7 +2468,7 @@ if df is not None and len(df) > 0:
                 delta = f"{kpis['Unique Learners Passed']:,} unique learners passed"
             # If no unique learner data, don't show a misleading count
         st.markdown(render_kpi_card("Passing Rate", val, delta, delta_type,
-                    help_text=f"Percentage of assessed learners scoring {PASS_THRESHOLD}% or higher (uniform passing standard). Learners with no assessment score are excluded, not counted as fails."), unsafe_allow_html=True)
+                    help_text="Percentage of assessed learners meeting the passing standard for their training type: Foundation 70%, Activation/Reinforcement 80% (unspecified types default to 70%). Learners with no assessment score are excluded, not counted as fails."), unsafe_allow_html=True)
 
     with kpi_col5:
         val = f"{kpis.get('Avg Assessment Score', 'N/A')}%" if "Avg Assessment Score" in kpis else "N/A"
@@ -2703,7 +2761,7 @@ if df is not None and len(df) > 0:
         • <b>Unique Learner</b> — a distinct person trained (counted once regardless of sessions attended)<br>
         • <b>Learner Attendance</b> — one attendance record (a learner attending a session)<br>
         • <b>Stores Reached</b> — distinct stores in the training data<br>
-        • <b>Pass Rate</b> — % of assessed learners scoring 70% or higher (uniform passing standard; learners with no score are excluded, not failed)<br>
+        • <b>Pass Rate</b> — % of assessed learners meeting the passing standard for their training type (Foundation 70%; Activation/Reinforcement 80%; unspecified 70%). Learners with no score are excluded, not failed<br>
         • <b>Avg Assessment Score</b> — average valid assessment score<br>
         • <b>Training Program</b> — a distinct training name/course<br>
         • <b>Attach Rate</b> — average attach rate before vs. after training (30 days post-training)<br>
@@ -2732,10 +2790,10 @@ if df is not None and len(df) > 0:
                 with cols[i % 2]:
                     st.markdown(render_insight_card(status, headline, detail), unsafe_allow_html=True)
 
-        # Pass Rate by Training Method
+        # Pass Rate by Training Type (phase)
         if metrics.get("Training Type") and metrics.get("Pass Flag") and df["Training Type"].nunique() > 1:
-            st.markdown('<div class="section-header">Pass Rate by Training Method</div>', unsafe_allow_html=True)
-            st.markdown('<div style="font-size:0.72rem;color:#6B7280;margin-bottom:6px;">Each method\'s pass rate, with the number of unique sessions delivered via that method.</div>', unsafe_allow_html=True)
+            st.markdown('<div class="section-header">Pass Rate by Training Type</div>', unsafe_allow_html=True)
+            st.markdown('<div style="font-size:0.72rem;color:#6B7280;margin-bottom:6px;">Each training type\'s pass rate against its passing standard (Foundation 70%, Activation/Reinforcement 80%), with the number of unique sessions delivered.</div>', unsafe_allow_html=True)
             # Count unique sessions per method; pass rate from all rows
             df_method_sessions = get_unique_sessions(df, metrics)
             method_session_counts = df_method_sessions.groupby("Training Type").size().reset_index(name="sessions")
@@ -3690,7 +3748,7 @@ if df is not None and len(df) > 0:
         • <b>Unique Learner</b> — a distinct individual trained, counted once even if they attended multiple sessions.<br>
         • <b>Learner Attendance</b> — one attendance record (a single learner attending a single session). Multiple attendances can belong to one learner.<br>
         • <b>Stores Reached</b> — the number of distinct stores represented in the training data.<br>
-        • <b>Pass Rate</b> — percentage of assessed learners who scored 70% or higher. The 70% passing standard is applied uniformly across all markets, derived from each learner's assessment score rather than source pass/fail flags. Learners with no assessment score are excluded from the calculation (not counted as fails).<br>
+        • <b>Pass Rate</b> — percentage of assessed learners who met the passing standard for their training type. The standard is tiered: <b>Foundation</b> trainings pass at <b>70%</b>, while <b>Activation</b> and <b>Reinforcement</b> trainings require <b>80%</b>. Trainings with an unspecified type default to 70%. The rule is applied uniformly across all markets, derived from each learner's assessment score rather than source pass/fail flags. Learners with no assessment score are excluded from the calculation (not counted as fails).<br>
         • <b>Avg Assessment Score</b> — the average of valid assessment scores within the current scope.<br>
         • <b>Training Program</b> — a distinct training name/course.<br>
         • <b>Attach Rate</b> — average attach rate before and after training, measured 30 days post-training (from Power BI sales data).
