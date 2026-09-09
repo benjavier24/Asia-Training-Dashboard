@@ -1135,8 +1135,10 @@ def generate_executive_insights(df, metrics, kpis, view_level="regional", active
     if "Pass Rate" in kpis:
         rate = kpis["Pass Rate"]
         if view_level == "regional" and metrics.get("Country") and df["Country"].nunique() > 1:
-            # Regional: compare markets
-            mkt_rates = df.groupby("Country")["Pass Flag"].mean().sort_values(ascending=False) * 100
+            # Regional: compare markets. dropna() excludes markets with no
+            # assessed learners (all-blank scores → NaN group mean) so they
+            # don't surface as a bogus "nan%" bottom performer.
+            mkt_rates = (df.groupby("Country")["Pass Flag"].mean().dropna().sort_values(ascending=False)) * 100
             if len(mkt_rates) > 1:
                 top_mkt, top_rate = mkt_rates.index[0], mkt_rates.iloc[0]
                 bot_mkt, bot_rate = mkt_rates.index[-1], mkt_rates.iloc[-1]
@@ -1147,8 +1149,9 @@ def generate_executive_insights(df, metrics, kpis, view_level="regional", active
                     insights.append(("attention", f"{bot_mkt} has the lowest pass rate at {bot_rate:.1f}%",
                                      f"{round(rate - bot_rate, 1)} percentage points below the regional average of {rate}%."))
         elif view_level == "market" and metrics.get("Account") and df["Account"].nunique() > 1:
-            # Market: compare accounts
-            acct_rates = df.groupby("Account")["Pass Flag"].mean().sort_values(ascending=False) * 100
+            # Market: compare accounts. dropna() excludes accounts with no
+            # assessed learners so they don't appear as a "nan%" bottom.
+            acct_rates = (df.groupby("Account")["Pass Flag"].mean().dropna().sort_values(ascending=False)) * 100
             if len(acct_rates) > 1:
                 top_acct, top_rate_a = acct_rates.index[0], acct_rates.iloc[0]
                 bot_acct, bot_rate_a = acct_rates.index[-1], acct_rates.iloc[-1]
@@ -1210,7 +1213,8 @@ def generate_executive_insights(df, metrics, kpis, view_level="regional", active
 
     # --- TRAINING METHOD INSIGHTS ---
     if metrics.get("Training Type") and df["Training Type"].nunique() > 1 and metrics.get("Pass Flag"):
-        method_perf = df.groupby("Training Type")["Pass Flag"].mean().reset_index()
+        # dropna() drops training types with no assessed learners (NaN pass rate)
+        method_perf = df.groupby("Training Type")["Pass Flag"].mean().dropna().reset_index()
         method_perf.columns = ["Training Type", "pass_rate"]
         method_perf["pass_rate"] = (method_perf["pass_rate"] * 100).round(1)
         method_perf = method_perf.sort_values("pass_rate", ascending=False)
@@ -1438,7 +1442,7 @@ def run_training_intelligence(question, df, metrics, kpis):
         answer_parts.append("**Entities requiring attention** (below-average pass rate):")
         meta["metric"] = "Pass Rate"
         meta["calc_desc"] = CALC_DESCRIPTIONS["Pass Rate"]
-        if "Pass Flag" in subset.columns:
+        if "Pass Flag" in subset.columns and subset["Pass Flag"].notna().sum() > 0:
             avg_rate = subset["Pass Flag"].mean() * 100
             # Determine grouping dimension
             if "Account" in subset.columns and subset["Account"].nunique() > 1:
@@ -1452,7 +1456,8 @@ def run_training_intelligence(question, df, metrics, kpis):
 
             meta["dimension"] = "Market" if dim == "Country" else dim
             if dim:
-                rates = subset.groupby(dim)["Pass Flag"].mean().sort_values() * 100
+                # dropna() excludes entities with no assessed learners.
+                rates = subset.groupby(dim)["Pass Flag"].mean().dropna().sort_values() * 100
                 below_avg = rates[rates < avg_rate]
                 if len(below_avg) > 0:
                     table = []
@@ -1490,7 +1495,7 @@ def run_training_intelligence(question, df, metrics, kpis):
             answer_parts.append(f"• Learner Attendances: {len(subset):,}")
         if stores:
             answer_parts.append(f"• Stores Reached: {stores:,}")
-        if "Pass Flag" in subset.columns:
+        if "Pass Flag" in subset.columns and subset["Pass Flag"].notna().sum() > 0:
             rate = subset["Pass Flag"].mean() * 100
             answer_parts.append(f"• Pass Rate: {rate:.1f}%")
         if "Assessment Score" in subset.columns:
@@ -1555,22 +1560,33 @@ def run_training_intelligence(question, df, metrics, kpis):
             meta["aggregation"] = f"Entities ranked by Pass Rate ({'ascending' if is_bottom else 'descending'})"
             if dim and subset[dim].nunique() >= 2:
                 grouped = subset.groupby(dim)["Pass Flag"].agg(["mean", "count"]).reset_index()
+                # Drop entities with no assessed learners (NaN mean) so they
+                # don't rank as a bogus "nan%" bottom performer.
+                grouped = grouped.dropna(subset=["mean"])
                 grouped["rate"] = (grouped["mean"] * 100).round(1)
                 grouped = grouped.sort_values("rate", ascending=is_bottom).head(n)
-                label = "Lowest" if is_bottom else "Top"
-                answer_parts.append(f"**{label} {min(n, len(grouped))} by Pass Rate ({meta['dimension']}):**")
-                table = []
-                for i, (_, row) in enumerate(grouped.iterrows(), 1):
-                    sessions = get_unique_session_count(subset[subset[dim] == row[dim]])
-                    answer_parts.append(f"{i}. {row[dim]} — {row['rate']}% · {sessions} sessions")
-                    table.append({"Rank": i, meta["dimension"]: row[dim], "Pass Rate": f"{row['rate']}%", "Sessions": sessions})
-                meta["supporting_table"] = table
+                if len(grouped) == 0:
+                    answer_parts.append("No entities have assessment data in the current scope.")
+                    meta["data_quality"] = "No valid data"
+                else:
+                    label = "Lowest" if is_bottom else "Top"
+                    answer_parts.append(f"**{label} {min(n, len(grouped))} by Pass Rate ({meta['dimension']}):**")
+                    table = []
+                    for i, (_, row) in enumerate(grouped.iterrows(), 1):
+                        sessions = get_unique_session_count(subset[subset[dim] == row[dim]])
+                        answer_parts.append(f"{i}. {row[dim]} — {row['rate']}% · {sessions} sessions")
+                        table.append({"Rank": i, meta["dimension"]: row[dim], "Pass Rate": f"{row['rate']}%", "Sessions": sessions})
+                    meta["supporting_table"] = table
             elif dim and subset[dim].nunique() == 1:
                 answer_parts.append(f"Only one {dim.lower()} in scope — ranking not available.")
                 meta["data_quality"] = "No comparison available"
             else:
-                rate = subset["Pass Flag"].mean() * 100
-                answer_parts.append(f"Pass Rate: {rate:.1f}%")
+                assessed = subset["Pass Flag"].notna().sum()
+                if assessed > 0:
+                    rate = subset["Pass Flag"].mean() * 100
+                    answer_parts.append(f"Pass Rate: {rate:.1f}%")
+                else:
+                    answer_parts.append("Pass Rate: No assessment data in scope.")
                 meta["data_quality"] = "No comparison available"
 
         elif is_score and "Assessment Score" in subset.columns:
@@ -1578,12 +1594,17 @@ def run_training_intelligence(question, df, metrics, kpis):
                   "Country" if "Country" in subset.columns and subset["Country"].nunique() > 1 else None
             if dim:
                 grouped = subset.groupby(dim)["Assessment Score"].mean().reset_index()
+                # Drop entities with no scored records (NaN mean).
+                grouped = grouped.dropna(subset=["Assessment Score"])
                 grouped["Assessment Score"] = grouped["Assessment Score"].round(1)
                 grouped = grouped.sort_values("Assessment Score", ascending=is_bottom).head(n)
-                label = "Lowest" if is_bottom else "Top"
-                answer_parts.append(f"**{label} by Avg Assessment Score ({dim}):**")
-                for i, (_, row) in enumerate(grouped.iterrows(), 1):
-                    answer_parts.append(f"{i}. {row[dim]} — {row['Assessment Score']}%")
+                if len(grouped) == 0:
+                    answer_parts.append("No entities have assessment score data in the current scope.")
+                else:
+                    label = "Lowest" if is_bottom else "Top"
+                    answer_parts.append(f"**{label} by Avg Assessment Score ({dim}):**")
+                    for i, (_, row) in enumerate(grouped.iterrows(), 1):
+                        answer_parts.append(f"{i}. {row[dim]} — {row['Assessment Score']}%")
             else:
                 answer_parts.append("Not enough entities to rank.")
         else:
@@ -1667,32 +1688,39 @@ def run_training_intelligence(question, df, metrics, kpis):
 
     # --- PASS RATE ---
     elif is_pass_rate and "Pass Flag" in subset.columns:
-        rate = subset["Pass Flag"].mean() * 100
         total = subset["Pass Flag"].notna().sum()
-        passed = int(subset["Pass Flag"].sum())
-        learners_passed = None
-        if "Trainee Code" in subset.columns:
-            learners_passed = subset[subset["Pass Flag"] == 1]["Trainee Code"].nunique()
-
         meta["metric"] = "Pass Rate"
         meta["calc_desc"] = CALC_DESCRIPTIONS["Pass Rate"]
-        meta["sample_note"] = f"{total:,} assessed records"
-        answer_parts.append(f"**Pass Rate: {rate:.1f}%**")
-        if learners_passed:
-            answer_parts.append(f"{learners_passed:,} unique learners passed out of {get_unique_learner_count(subset):,}.")
+        if total == 0:
+            # No assessed learners in scope — don't print "nan%".
+            answer_parts.append("**Pass Rate: No assessment data**")
+            answer_parts.append("No learners in the current scope have an assessment score.")
+            meta["data_quality"] = "No valid data"
         else:
-            answer_parts.append(f"{passed:,} passing records out of {total:,} assessed.")
+            rate = subset["Pass Flag"].mean() * 100
+            passed = int(subset["Pass Flag"].sum())
+            learners_passed = None
+            if "Trainee Code" in subset.columns:
+                learners_passed = subset[subset["Pass Flag"] == 1]["Trainee Code"].nunique()
 
-        if "Country" in subset.columns and subset["Country"].nunique() > 1:
-            supporting.append("By Market:")
-            by_mkt = subset.groupby("Country")["Pass Flag"].mean().sort_values(ascending=False) * 100
-            for mkt, r in by_mkt.items():
-                supporting.append(f"  {mkt}: {r:.1f}%")
-        elif "Account" in subset.columns and subset["Account"].nunique() > 1:
-            supporting.append("By Partner:")
-            by_acct = subset.groupby("Account")["Pass Flag"].mean().sort_values(ascending=False) * 100
-            for acct, r in by_acct.items():
-                supporting.append(f"  {acct}: {r:.1f}%")
+            meta["sample_note"] = f"{total:,} assessed records"
+            answer_parts.append(f"**Pass Rate: {rate:.1f}%**")
+            if learners_passed:
+                answer_parts.append(f"{learners_passed:,} unique learners passed out of {get_unique_learner_count(subset):,}.")
+            else:
+                answer_parts.append(f"{passed:,} passing records out of {total:,} assessed.")
+
+            # dropna() so markets/partners with no assessed learners don't show "nan%".
+            if "Country" in subset.columns and subset["Country"].nunique() > 1:
+                supporting.append("By Market:")
+                by_mkt = subset.groupby("Country")["Pass Flag"].mean().dropna().sort_values(ascending=False) * 100
+                for mkt, r in by_mkt.items():
+                    supporting.append(f"  {mkt}: {r:.1f}%")
+            elif "Account" in subset.columns and subset["Account"].nunique() > 1:
+                supporting.append("By Partner:")
+                by_acct = subset.groupby("Account")["Pass Flag"].mean().dropna().sort_values(ascending=False) * 100
+                for acct, r in by_acct.items():
+                    supporting.append(f"  {acct}: {r:.1f}%")
         follow_ups = ["Which accounts need attention?", "Show pass rate trend", "Compare training methods"]
 
     # --- SESSIONS / TRAINING COUNT ---
@@ -1826,14 +1854,18 @@ def run_training_intelligence(question, df, metrics, kpis):
     # --- WHY / ROOT CAUSE ---
     elif is_why:
         answer_parts.append("**Contributing Factors Analysis:**")
-        if "Pass Flag" in subset.columns:
+        if "Pass Flag" in subset.columns and subset["Pass Flag"].notna().sum() > 0:
             overall_rate = subset["Pass Flag"].mean() * 100
             answer_parts.append(f"Overall Pass Rate: {overall_rate:.1f}%")
             answer_parts.append("")
             for dim_name, dim_col in [("Partner", "Account"), ("Trainer", "Trainer"), ("Program", "Training Name")]:
                 if dim_col in subset.columns and subset[dim_col].nunique() > 1:
-                    rates = subset.groupby(dim_col)["Pass Flag"].mean().sort_values() * 100
+                    # dropna() excludes entities with no assessed learners so
+                    # they don't appear as a "nan%" lowest performer.
+                    rates = subset.groupby(dim_col)["Pass Flag"].mean().dropna().sort_values() * 100
                     lowest = rates.head(3)
+                    if len(lowest) == 0:
+                        continue
                     answer_parts.append(f"Lowest by {dim_name}:")
                     for entity, rate in lowest.items():
                         answer_parts.append(f"  • {entity}: {rate:.1f}%")
@@ -2801,13 +2833,18 @@ if df is not None and len(df) > 0:
             method_pass_rates.columns = ["Training Type", "pass_rate"]
             method_comp = method_session_counts.merge(method_pass_rates, on="Training Type")
             method_comp["pass_rate"] = (method_comp["pass_rate"] * 100).round(1)
-            method_comp = method_comp.sort_values("pass_rate", ascending=False)
+            # Sort by pass rate; NaN (no assessed learners) sorts last.
+            method_comp = method_comp.sort_values("pass_rate", ascending=False, na_position="last")
             for _, row in method_comp.iterrows():
+                # Show "No assessment data" instead of "nan%" for types with no scores.
+                rate_html = (f'{row["pass_rate"]}% <span style="font-size:0.62rem;font-weight:400;color:#9CA3AF;">pass rate</span>'
+                             if pd.notna(row["pass_rate"])
+                             else '<span style="font-size:0.62rem;font-weight:400;color:#9CA3AF;">No assessment data</span>')
                 st.markdown(f"""
                 <div class="method-row">
                     <span class="method-name">{row["Training Type"]}</span>
                     <span class="method-stat">{row["sessions"]:,} sessions</span>
-                    <span class="method-rate">{row["pass_rate"]}% <span style="font-size:0.62rem;font-weight:400;color:#9CA3AF;">pass rate</span></span>
+                    <span class="method-rate">{rate_html}</span>
                 </div>
                 """, unsafe_allow_html=True)
 

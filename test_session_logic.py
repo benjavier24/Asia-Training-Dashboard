@@ -760,6 +760,100 @@ def test_tiered_training_type_vs_method_separation():
     print("PASS Test TIER-E: Training Type (phase) and Training Method (mode) kept separate")
 
 
+# === NaN-GROUP HANDLING TESTS (blank-score groups must not show "nan") ===
+
+def _mixed_market_df():
+    """Build a dataset where one market (SG) has ALL blank assessment scores,
+    while others have real scores — reproducing the 'nan%' insight bug."""
+    from app import prepare_dataframe
+    rows = []
+    # ID: real scores (mostly passing)
+    for i in range(20):
+        rows.append({"Country": "ID", "Date of Training": "2026-03-01", "Training Title": "F",
+                     "Trainer Name": "T1", "Partner Name": "ERAFONE", "Training Type": "Foundation",
+                     "Trainee Code": f"ID{i}", "Training Assessment Score %": 85, "Pass Flag": 1})
+    # PH: real scores (mixed)
+    for i in range(20):
+        sc = 90 if i % 2 == 0 else 40
+        rows.append({"Country": "PH", "Date of Training": "2026-03-02", "Training Title": "F",
+                     "Trainer Name": "T2", "Partner Name": "Globe", "Training Type": "Foundation",
+                     "Trainee Code": f"PH{i}", "Training Assessment Score %": sc, "Pass Flag": 1})
+    # SG: NO assessment scores at all -> Pass Flag becomes NaN for every row
+    for i in range(10):
+        rows.append({"Country": "SG", "Date of Training": "2026-03-03", "Training Title": "F",
+                     "Trainer Name": "T3", "Partner Name": "Singtel", "Training Type": "Foundation",
+                     "Trainee Code": f"SG{i}", "Training Assessment Score %": None, "Pass Flag": 1})
+    return prepare_dataframe(pd.DataFrame(rows))
+
+
+def test_nan_executive_insights_no_nan_string():
+    """Regional insights must not render 'nan' when a market has no assessed learners."""
+    from app import generate_executive_insights, compute_kpis, detect_metrics
+    df = _mixed_market_df()
+    metrics = detect_metrics(df)
+    kpis = compute_kpis(df, metrics)
+    insights = generate_executive_insights(df, metrics, kpis, view_level="regional")
+    blob = " ".join(f"{h} {d}" for _, h, d in insights).lower()
+    assert "nan" not in blob, f"Executive insights leaked 'nan': {blob}"
+    print("PASS Test NAN-A: Executive insights exclude blank-score market (no 'nan')")
+
+
+def test_nan_training_intelligence_pass_rate_no_nan():
+    """TI pass-rate answer (with by-market breakdown) must not show 'nan%'."""
+    from app import run_training_intelligence, compute_kpis, detect_metrics
+    df = _mixed_market_df()
+    metrics = detect_metrics(df)
+    kpis = compute_kpis(df, metrics)
+    result = run_training_intelligence("what is the pass rate?", df, metrics, kpis)
+    assert "nan" not in result["answer"].lower(), f"TI pass-rate leaked 'nan': {result['answer']}"
+    print("PASS Test NAN-B: TI pass-rate answer excludes blank-score market (no 'nan')")
+
+
+def test_nan_ranking_bottom_no_nan():
+    """A 'worst markets by pass rate' ranking must not surface the blank-score market as nan%."""
+    from app import run_training_intelligence, compute_kpis, detect_metrics
+    df = _mixed_market_df()
+    metrics = detect_metrics(df)
+    kpis = compute_kpis(df, metrics)
+    result = run_training_intelligence("worst markets by pass rate", df, metrics, kpis)
+    assert "nan" not in result["answer"].lower(), f"Ranking leaked 'nan': {result['answer']}"
+    print("PASS Test NAN-C: Bottom ranking excludes blank-score market (no 'nan')")
+
+
+def test_nan_needs_attention_and_why_no_nan():
+    """Needs-attention and why/root-cause answers must not show 'nan%'."""
+    from app import run_training_intelligence, generate_needs_attention, compute_kpis, detect_metrics
+    df = _mixed_market_df()
+    metrics = detect_metrics(df)
+    kpis = compute_kpis(df, metrics)
+    for q in ["which markets need attention?", "why is the pass rate low?"]:
+        result = run_training_intelligence(q, df, metrics, kpis)
+        assert "nan" not in result["answer"].lower(), f"'{q}' leaked 'nan': {result['answer']}"
+    # generate_needs_attention items
+    items = generate_needs_attention(df, metrics, kpis, view_level="regional")
+    blob = " ".join(f"{e} {r} {m}" for e, r, m in items).lower()
+    assert "nan" not in blob, f"Needs-attention leaked 'nan': {blob}"
+    print("PASS Test NAN-D: Needs-attention & why answers exclude blank-score groups")
+
+
+def test_nan_all_blank_subset_shows_no_data():
+    """When the ENTIRE scope has no assessment scores, pass rate shows 'No assessment data', not nan%."""
+    from app import prepare_dataframe, run_training_intelligence, compute_kpis, detect_metrics
+    rows = [
+        {"Country": "SG", "Date of Training": "2026-03-03", "Training Title": "F", "Trainer Name": "T3",
+         "Partner Name": "Singtel", "Trainee Code": f"SG{i}", "Training Assessment Score %": None, "Pass Flag": 1}
+        for i in range(8)
+    ]
+    df = prepare_dataframe(pd.DataFrame(rows))
+    metrics = detect_metrics(df)
+    kpis = compute_kpis(df, metrics)
+    result = run_training_intelligence("what is the pass rate?", df, metrics, kpis)
+    ans = result["answer"].lower()
+    assert "nan" not in ans, f"All-blank subset leaked 'nan': {result['answer']}"
+    assert "no assessment data" in ans, f"Expected 'No assessment data' message, got: {result['answer']}"
+    print("PASS Test NAN-E: All-blank scope shows 'No assessment data' (no 'nan')")
+
+
 def _run_all_tests():
     test_a_repeated_trainee_rows()
     test_b_multiple_sessions_same_week()
@@ -809,6 +903,12 @@ def _run_all_tests():
     test_tiered_blank_type_defaults_to_70()
     test_tiered_training_type_vs_method_separation()
     print("--- tiered passing standard tests passed ---")
+    test_nan_executive_insights_no_nan_string()
+    test_nan_training_intelligence_pass_rate_no_nan()
+    test_nan_ranking_bottom_no_nan()
+    test_nan_needs_attention_and_why_no_nan()
+    test_nan_all_blank_subset_shows_no_data()
+    print("--- NaN-group handling tests passed ---")
     print("\nAll tests passed!")
 
 
