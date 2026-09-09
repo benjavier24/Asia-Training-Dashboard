@@ -1509,8 +1509,12 @@ def run_training_intelligence(question, df, metrics, kpis):
 
     # --- TREND ---
     elif is_trend:
-        if "Date" in subset.columns:
+        # Require actual (non-NaT) dates, not just the column's presence —
+        # resample() on an all-NaT index raises.
+        if "Date" in subset.columns and subset["Date"].notna().any():
             sessions_df = get_unique_sessions(subset, detect_metrics(subset))
+            # Drop rows with no date before resampling to a weekly index.
+            sessions_df = sessions_df[sessions_df["Date"].notna()]
             weekly = sessions_df.set_index("Date").resample("W").size()
             meta["metric"] = "Training Sessions"
             meta["aggregation"] = "Weekly unique Training Sessions"
@@ -1791,9 +1795,11 @@ def run_training_intelligence(question, df, metrics, kpis):
             before = subset["Attach Rate Before"].dropna()
             after = subset["Attach Rate After"].dropna()
             if len(before) > 0 and len(after) > 0:
+                # Attach rates are already normalized to 0–100 per row in
+                # prepare_dataframe, so no additional scaling is needed here.
+                # (The old `if avg_b <= 1` heuristic double-scaled edge cases.)
                 avg_b = before.mean()
                 avg_a = after.mean()
-                if avg_b <= 1: avg_b *= 100; avg_a *= 100
                 imp = avg_a - avg_b
                 answer_parts.append(f"**Attach Rate Impact (30 days post-training):**")
                 answer_parts.append(f"• Before: {avg_b:.1f}%")
@@ -2564,9 +2570,13 @@ if df is not None and len(df) > 0:
                     ).sort_values(ascending=False)
                 else:
                     method_sessions = df["Training Type"].value_counts()
-            top_method = method_sessions.index[0] if len(method_sessions) > 0 else "N/A"
-            val = top_method
-            delta = f"{method_sessions.iloc[0]:,} sessions"
+            # Guard: after filtering, Training Type may be all-NaN → empty series.
+            if len(method_sessions) > 0:
+                val = method_sessions.index[0]
+                delta = f"{method_sessions.iloc[0]:,} sessions"
+            else:
+                val = "N/A"
+                delta = "no training type data"
             st.markdown(render_kpi_card("Top Method", val, delta, size="secondary"), unsafe_allow_html=True)
         elif "Total Training Hours" in kpis:
             val = f"{kpis['Total Training Hours']:,.0f}"
@@ -2665,6 +2675,13 @@ if df is not None and len(df) > 0:
 
         acct_breakdown = acct_breakdown.sort_values("Trainings", ascending=False)
 
+    # Guard: the in-tab training-program filter can narrow to rows whose Account
+    # is all-NaN, leaving an empty breakdown → st.columns(0) would crash. Only
+    # render the cards/table when there is at least one account row.
+    if selected_market and metrics.get("Account") and len(df) > 0 and df["Account"].nunique() > 1 and len(acct_breakdown) == 0:
+        st.info("No account-level data for the current selection. Try a different training program or clear the filter.")
+
+    if selected_market and metrics.get("Account") and len(df) > 0 and df["Account"].nunique() > 1 and len(acct_breakdown) > 0:
         # Display as KPI cards per account (top 6)
         top_accounts = acct_breakdown.head(6)
         acct_card_cols = st.columns(min(len(top_accounts), 3))
@@ -3078,14 +3095,20 @@ if df is not None and len(df) > 0:
 
         # ─── TRAINING TYPE BREAKDOWN (Foundation / Activation / Reinforcement / Champion) ───
         st.markdown("")
+        # Count unique sessions per training type using the reusable session helper.
+        # Compute first so we can skip the whole section when Training Type is
+        # all-NaN after filtering (value_counts empty → st.columns(0) would crash).
+        _type_data_available = False
         if metrics.get("Training Type") and len(df) > 0:
-            st.markdown('<div class="section-header">Training Type Breakdown</div>', unsafe_allow_html=True)
-            st.markdown('<div style="font-size:0.72rem;color:#6B7280;margin-bottom:6px;">Number of unique training sessions delivered per type, and each type\'s share of all sessions.</div>', unsafe_allow_html=True)
-
-            # Count unique sessions per training type using the reusable session helper
             df_type_sessions = get_unique_sessions(df, metrics)
             type_data = df_type_sessions["Training Type"].value_counts().reset_index()
             type_data.columns = ["Type", "Sessions"]
+            _type_data_available = len(type_data) > 0
+
+        if _type_data_available:
+            st.markdown('<div class="section-header">Training Type Breakdown</div>', unsafe_allow_html=True)
+            st.markdown('<div style="font-size:0.72rem;color:#6B7280;margin-bottom:6px;">Number of unique training sessions delivered per type, and each type\'s share of all sessions.</div>', unsafe_allow_html=True)
+
             type_data["% of Total"] = (type_data["Sessions"] / type_data["Sessions"].sum() * 100).round(1)
 
             # Color map for known training types

@@ -854,6 +854,79 @@ def test_nan_all_blank_subset_shows_no_data():
     print("PASS Test NAN-E: All-blank scope shows 'No assessment data' (no 'nan')")
 
 
+# === EDGE-CASE ROBUSTNESS TESTS (all-NaN-after-filter must not crash) ===
+
+def test_edge_trend_all_nat_dates_no_crash():
+    """TI trend must not crash when the scope has no valid dates (all NaT)."""
+    from app import prepare_dataframe, run_training_intelligence, compute_kpis, detect_metrics
+    # prepare_dataframe drops all-NaT rows, so simulate a subset by building a
+    # df whose dates are all invalid strings → become NaT, then all dropped.
+    rows = [
+        {"Country": "PH", "Date of Training": "not-a-date", "Training Title": "F", "Trainer Name": "T",
+         "Partner Name": "Globe", "Trainee Code": f"L{i}", "Training Assessment Score %": 80, "Pass Flag": 1}
+        for i in range(5)
+    ]
+    df = prepare_dataframe(pd.DataFrame(rows))
+    metrics = detect_metrics(df)
+    kpis = compute_kpis(df, metrics)
+    # Should not raise. prepare_dataframe drops all-NaT rows, so df may be empty
+    # here; the point is simply that no exception is thrown and we get output.
+    result = run_training_intelligence("show me the training volume trend over time", df, metrics, kpis)
+    answer = result["answer"] if isinstance(result, dict) else result
+    assert isinstance(answer, str) and len(answer) > 0
+    print("PASS Test EDGE-A: TI trend handles no-valid-date scope without crashing")
+
+
+def test_edge_single_row_trend_no_crash():
+    """A single-row scope must not crash the trend (insufficient range message)."""
+    from app import prepare_dataframe, run_training_intelligence, compute_kpis, detect_metrics
+    rows = [{"Country": "PH", "Date of Training": "2026-03-01", "Training Title": "F", "Trainer Name": "T",
+             "Partner Name": "Globe", "Trainee Code": "L1", "Training Assessment Score %": 80, "Pass Flag": 1}]
+    df = prepare_dataframe(pd.DataFrame(rows))
+    metrics = detect_metrics(df)
+    kpis = compute_kpis(df, metrics)
+    result = run_training_intelligence("trend over time", df, metrics, kpis)
+    answer = result["answer"] if isinstance(result, dict) else result
+    assert "insufficient" in answer.lower() or "trend" in answer.lower()
+    print("PASS Test EDGE-B: Single-row scope handles trend without crashing")
+
+
+def test_edge_attach_rate_no_double_scaling():
+    """Attach rate values (already 0-100) must not be re-scaled by the removed heuristic."""
+    from app import prepare_dataframe, run_training_intelligence, compute_kpis, detect_metrics
+    # Low but legitimate attach rates already on a 0-100 scale (e.g. 0.9% and 1.0%).
+    # prepare_dataframe normalizes per row: values <= 1 are treated as decimals → *100.
+    # So supply already-percentage values > 1 to represent true low percentages.
+    rows = [
+        {"Country": "PH", "Date of Training": "2026-03-01", "Training Title": "F", "Trainer Name": "T",
+         "Partner Name": "Globe", "Trainee Code": f"L{i}", "Training Assessment Score %": 80, "Pass Flag": 1,
+         "Attach Rate Before": 3.0, "Attach Rate After": 5.0}
+        for i in range(5)
+    ]
+    df = prepare_dataframe(pd.DataFrame(rows))
+    metrics = detect_metrics(df)
+    kpis = compute_kpis(df, metrics)
+    result = run_training_intelligence("what is the attach rate impact", df, metrics, kpis)
+    ans = result["answer"] if isinstance(result, dict) else result
+    # 3.0 and 5.0 are > 1 so stay as-is; must appear as 3.0%/5.0%, not 300%/500%.
+    assert "3.0%" in ans and "5.0%" in ans, f"Attach rates were mis-scaled: {ans}"
+    assert "300" not in ans and "500" not in ans, f"Attach rates double-scaled: {ans}"
+    print("PASS Test EDGE-C: Attach rate not double-scaled (removed <=1 heuristic)")
+
+
+def test_edge_empty_groupby_helpers_no_crash():
+    """Core count helpers must return safe values on an empty dataframe."""
+    from app import get_unique_sessions, compute_kpis, detect_metrics
+    empty = pd.DataFrame(columns=["Country", "Date", "Training Name", "Trainer", "Trainee Code", "Pass Flag"])
+    metrics = detect_metrics(empty)
+    # Should not raise
+    sessions = get_unique_sessions(empty, metrics)
+    assert len(sessions) == 0
+    kpis = compute_kpis(empty, metrics)
+    assert isinstance(kpis, dict)
+    print("PASS Test EDGE-D: Empty dataframe handled by session/KPI helpers without crashing")
+
+
 def _run_all_tests():
     test_a_repeated_trainee_rows()
     test_b_multiple_sessions_same_week()
@@ -909,6 +982,11 @@ def _run_all_tests():
     test_nan_needs_attention_and_why_no_nan()
     test_nan_all_blank_subset_shows_no_data()
     print("--- NaN-group handling tests passed ---")
+    test_edge_trend_all_nat_dates_no_crash()
+    test_edge_single_row_trend_no_crash()
+    test_edge_attach_rate_no_double_scaling()
+    test_edge_empty_groupby_helpers_no_crash()
+    print("--- edge-case robustness tests passed ---")
     print("\nAll tests passed!")
 
 
