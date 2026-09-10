@@ -1142,9 +1142,12 @@ def generate_executive_insights(df, metrics, kpis, view_level="regional", active
             if len(mkt_rates) > 1:
                 top_mkt, top_rate = mkt_rates.index[0], mkt_rates.iloc[0]
                 bot_mkt, bot_rate = mkt_rates.index[-1], mkt_rates.iloc[-1]
-                gap = round(top_rate - bot_rate, 1)
+                # Compare the top market to the regional average (a stable
+                # reference), not to the lowest market (a fragile top-vs-bottom
+                # gap that swings with small-sample markets).
+                above_avg = round(top_rate - rate, 1)
                 insights.append(("positive", f"{top_mkt} has the highest pass rate at {top_rate:.1f}%",
-                                 f"{gap} percentage points above {bot_mkt} ({bot_rate:.1f}%)."))
+                                 f"{above_avg} percentage points above the regional average of {rate}%."))
                 if bot_rate < 70:
                     insights.append(("attention", f"{bot_mkt} has the lowest pass rate at {bot_rate:.1f}%",
                                      f"{round(rate - bot_rate, 1)} percentage points below the regional average of {rate}%."))
@@ -1156,8 +1159,10 @@ def generate_executive_insights(df, metrics, kpis, view_level="regional", active
                 top_acct, top_rate_a = acct_rates.index[0], acct_rates.iloc[0]
                 bot_acct, bot_rate_a = acct_rates.index[-1], acct_rates.iloc[-1]
                 mkt_name = active_market or "this market"
+                # Compare the top account to the market average (stable reference).
+                above_avg_a = round(top_rate_a - rate, 1)
                 insights.append(("positive", f"{top_acct} has the highest pass rate at {top_rate_a:.1f}%",
-                                 f"In {mkt_name}."))
+                                 f"{above_avg_a} percentage points above the {mkt_name} average of {rate}%."))
                 if bot_rate_a < rate:
                     diff = round(rate - bot_rate_a, 1)
                     insights.append(("attention", f"{bot_acct} has the lowest pass rate at {bot_rate_a:.1f}%",
