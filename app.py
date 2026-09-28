@@ -3905,13 +3905,18 @@ if df is not None and len(df) > 0:
                     }
                     st.dataframe(detail_df, use_container_width=True, height=280, column_config=col_config)
 
-                # Show pending stores list if any
+                # Show pending stores list if any.
+                # Render as a SINGLE dataframe rather than one st.markdown per
+                # store inside st.columns — the old loop emitted thousands of
+                # individual widget writes for large markets (e.g. ~2,400
+                # Indonesia stores), which was the dominant cause of the ~20s
+                # Performance-tab render. One dataframe is effectively instant.
                 if completion["pending_stores"]:
                     with st.expander(f"⏳ View {completion['pending_count']} Pending Stores", expanded=False):
-                        pending_cols = st.columns(3)
-                        for i, store in enumerate(sorted(completion["pending_stores"])):
-                            with pending_cols[i % 3]:
-                                st.markdown(f"• {store}")
+                        _pending_df = pd.DataFrame(
+                            {"Pending Store": sorted(completion["pending_stores"])}
+                        )
+                        st.dataframe(_pending_df, use_container_width=True, height=300, hide_index=True)
             else:
                 st.warning("Store and Date columns are required for completion tracking.")
 
