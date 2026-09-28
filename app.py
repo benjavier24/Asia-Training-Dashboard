@@ -1,5 +1,6 @@
 import streamlit as st
 import re
+import time
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -7,6 +8,30 @@ from io import BytesIO
 import numpy as np
 from datetime import datetime
 from thefuzz import fuzz, process
+
+
+# === LIGHTWEIGHT RENDER TIMING (diagnostic) ===
+# Records how long each major render section takes on the CURRENT rerun so we
+# can see, in the live app, exactly where a slow filter change spends its time.
+# Timings are stored per-rerun in st.session_state["_timings"] and shown in a
+# sidebar expander. Near-zero overhead; safe to leave on.
+class _Timer:
+    """Context manager: `with time_section("name"): ...` records elapsed ms."""
+    def __init__(self, label):
+        self.label = label
+
+    def __enter__(self):
+        self._t0 = time.perf_counter()
+        return self
+
+    def __exit__(self, *exc):
+        ms = (time.perf_counter() - self._t0) * 1000.0
+        st.session_state.setdefault("_timings", []).append((self.label, round(ms, 1)))
+        return False
+
+
+def time_section(label):
+    return _Timer(label)
 
 # === BUSINESS RULES ===
 # Passing standard: a learner passes the assessment if their normalized
@@ -2427,11 +2452,17 @@ with header_col2:
 
 # === MAIN CONTENT WITH SIDEBAR FILTERS ===
 if df is not None and len(df) > 0:
+    # Reset per-rerun timing log (diagnostic — see the sidebar "Render timing").
+    st.session_state["_timings"] = []
+    _rerun_start = time.perf_counter()
+
     # Prepare (normalize + coerce + parse dates) ONCE per upload. Stored in
     # session_state so we don't re-hash the full raw frame on every rerun just
     # to look up prepare_dataframe's cache — that hashing was a big per-filter cost.
-    df = get_prepared_df(df)
-    metrics = detect_metrics(df)
+    with time_section("prepare_dataframe"):
+        df = get_prepared_df(df)
+    with time_section("detect_metrics"):
+        metrics = detect_metrics(df)
 
     # ─── SIDEBAR FILTERS ───
     with st.sidebar:
@@ -2545,8 +2576,10 @@ if df is not None and len(df) > 0:
 
     # Recompute after filtering (cached on the scope fingerprint so re-selecting
     # a previously-viewed scope returns instantly).
-    metrics = detect_metrics(df)
-    kpis = compute_kpis_scoped(df, metrics)
+    with time_section("detect_metrics (post-filter)"):
+        metrics = detect_metrics(df)
+    with time_section("compute_kpis"):
+        kpis = compute_kpis_scoped(df, metrics)
 
     # ─── DYNAMIC TITLE & BREADCRUMB ───
     COUNTRY_NAMES = {
@@ -2800,13 +2833,16 @@ if df is not None and len(df) > 0:
     if not selected_market and metrics.get("Country") and df["Country"].nunique() == 1:
         selected_market = df["Country"].iloc[0]
 
+    _acct_bd_timer = time_section("account_breakdown_build")
     if selected_market and metrics.get("Account") and len(df) > 0 and df["Account"].nunique() > 1:
+        _acct_bd_timer.__enter__()
         st.markdown("---")
         _market_full_name = COUNTRY_NAMES.get(selected_market, selected_market)
         st.markdown(f'<div class="section-header">{_market_full_name} — Account Breakdown</div>', unsafe_allow_html=True)
 
-        # Training Name filter for the account breakdown
-        breakdown_df = df.copy()
+        # Training Name filter for the account breakdown.
+        # NOTE: no df.copy() — we only ever read or take filtered views of df.
+        breakdown_df = df
         if metrics.get("Training Name") and len(df) > 0:
             training_options = ["All Trainings"] + sorted(df["Training Name"].dropna().unique().tolist())
             sel_breakdown_training = st.selectbox(
@@ -2821,29 +2857,12 @@ if df is not None and len(df) > 0:
         else:
             sel_breakdown_training = "All Trainings"
 
-        # Build per-account summary
-        # Count actual unique sessions, not rows
-        # A unique session = unique combination of Date + Training Name + Trainer (or Training ID if available)
-        if metrics.get("Training ID"):
-            acct_breakdown_agg = {"Trainings": ("Training ID", "nunique")}
-        else:
-            # Create a synthetic session key from available fields
-            session_key_parts = []
-            if metrics.get("Date"):
-                session_key_parts.append(breakdown_df["Date"].astype(str))
-            if metrics.get("Training Name"):
-                session_key_parts.append(breakdown_df["Training Name"].astype(str))
-            if metrics.get("Trainer"):
-                session_key_parts.append(breakdown_df["Trainer"].astype(str))
-            if session_key_parts:
-                breakdown_df = breakdown_df.copy()
-                breakdown_df["_session_key"] = session_key_parts[0]
-                for part in session_key_parts[1:]:
-                    breakdown_df["_session_key"] = breakdown_df["_session_key"] + "|" + part
-                acct_breakdown_agg = {"Trainings": ("_session_key", "nunique")}
-            else:
-                acct_breakdown_agg = {"Trainings": ("Account", "count")}
-
+        # Build per-account summary. Count actual unique sessions, not rows.
+        # Trainings (unique sessions) per account is computed separately and
+        # VECTORIZED (see below) — the old code built a per-row string session
+        # key with object-dtype concatenation, which was very slow on large
+        # slices. The remaining aggregations are cheap groupby reductions.
+        acct_breakdown_agg = {}
         if metrics.get("Trainee Code"):
             acct_breakdown_agg["Frontliners"] = ("Trainee Code", "nunique")
         elif metrics.get("Trainee Name"):
@@ -2859,7 +2878,22 @@ if df is not None and len(df) > 0:
         if metrics.get("Attach Rate After") and "Attach Rate After" in breakdown_df.columns:
             acct_breakdown_agg["AR After"] = ("Attach Rate After", "mean")
 
-        acct_breakdown = breakdown_df.groupby("Account").agg(**acct_breakdown_agg).reset_index()
+        if acct_breakdown_agg:
+            acct_breakdown = breakdown_df.groupby("Account").agg(**acct_breakdown_agg).reset_index()
+        else:
+            acct_breakdown = breakdown_df[["Account"]].drop_duplicates().reset_index(drop=True)
+
+        # Unique sessions ("Trainings") per account — fully vectorized, no
+        # per-row string building: drop duplicate session keys, then count per
+        # account. Uses Training ID when available, else the composite key.
+        if metrics.get("Training ID"):
+            _sess = breakdown_df.drop_duplicates(subset=["Training ID"])
+        else:
+            _session_cols = [c for c in ["Date", "Training Name", "Trainer"] if metrics.get(c)]
+            _sess = breakdown_df.drop_duplicates(subset=["Account"] + _session_cols) if _session_cols else breakdown_df
+        _trainings = _sess.groupby("Account").size().rename("Trainings").reset_index()
+        acct_breakdown = acct_breakdown.merge(_trainings, on="Account", how="left")
+        acct_breakdown["Trainings"] = acct_breakdown["Trainings"].fillna(0).astype(int)
 
         # If Frontliners is 0 but we don't have trainee data, show N/A instead of a fake number
         # (don't fallback to row count — it's misleading)
@@ -2878,6 +2912,7 @@ if df is not None and len(df) > 0:
             acct_breakdown["AR Lift (pp)"] = (acct_breakdown["AR After"] - acct_breakdown["AR Before"]).round(1)
 
         acct_breakdown = acct_breakdown.sort_values("Trainings", ascending=False)
+        _acct_bd_timer.__exit__()
 
     # Guard: the in-tab training-program filter can narrow to rows whose Account
     # is all-NaN, leaving an empty breakdown → st.columns(0) would crash. Only
@@ -2989,7 +3024,8 @@ if df is not None and len(df) > 0:
         if "Trainings" in acct_breakdown.columns:
             col_config_acct["Trainings"] = st.column_config.NumberColumn("Training Sessions")
 
-        st.dataframe(acct_breakdown, use_container_width=True, height=250, column_config=col_config_acct)
+        with time_section("account_breakdown_render"):
+            st.dataframe(acct_breakdown, use_container_width=True, height=250, column_config=col_config_acct)
 
 
     # ─── TABBED CONTENT SECTIONS ───
@@ -2999,6 +3035,8 @@ if df is not None and len(df) > 0:
         "Overview", "Performance", "Trends", "Data & Export"
     ])
 
+    _tab_overview_timer = time_section("tab_overview")
+    _tab_overview_timer.__enter__()
     # === TAB 1: OVERVIEW & INSIGHTS ===
     with tab_overview:
         # About / help — native HTML details to avoid Material icon font fallback issues
@@ -3594,6 +3632,9 @@ if df is not None and len(df) > 0:
                 st.plotly_chart(fig, use_container_width=True)
 
 
+    _tab_overview_timer.__exit__()
+    _tab_perf_timer = time_section("tab_performance")
+    _tab_perf_timer.__enter__()
     # === TAB 2: PERFORMANCE ===
     with tab_performance:
         # If no performance dimensions are available at all, guide the user
@@ -3875,6 +3916,9 @@ if df is not None and len(df) > 0:
                 st.warning("Store and Date columns are required for completion tracking.")
 
 
+    _tab_perf_timer.__exit__()
+    _tab_trends_timer = time_section("tab_trends")
+    _tab_trends_timer.__enter__()
     # === TAB 3: TRENDS ===
     with tab_trends:
         if not metrics.get("Date"):
@@ -3944,6 +3988,9 @@ if df is not None and len(df) > 0:
             st.plotly_chart(fig, use_container_width=True)
 
 
+    _tab_trends_timer.__exit__()
+    _tab_data_timer = time_section("tab_data")
+    _tab_data_timer.__enter__()
     # === TAB 4: DATA & EXPORT ===
     with tab_data:
         data_col1, data_col2 = st.columns([3, 1])
@@ -4017,6 +4064,20 @@ if df is not None and len(df) > 0:
         </div>
         </details>
         """, unsafe_allow_html=True)
+
+    _tab_data_timer.__exit__()
+
+    # ─── RENDER TIMING (diagnostic) ───
+    # Shows how long each section of THIS rerun took. Use it to see exactly
+    # where a slow filter change spends its time. Safe to remove later.
+    _total_ms = round((time.perf_counter() - _rerun_start) * 1000.0, 1)
+    with st.sidebar:
+        with st.expander(f"⏱ Render timing — {_total_ms:,.0f} ms total", expanded=False):
+            _timings = st.session_state.get("_timings", [])
+            for _label, _ms in sorted(_timings, key=lambda x: -x[1]):
+                st.markdown(f"<div style='font-size:0.72rem;display:flex;justify-content:space-between;'>"
+                            f"<span>{_label}</span><span style='font-weight:600;'>{_ms:,.0f} ms</span></div>",
+                            unsafe_allow_html=True)
 
 
 # === SIDEBAR: Data Source & Sales (inside expanders below filters) ===
