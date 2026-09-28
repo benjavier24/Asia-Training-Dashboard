@@ -1018,6 +1018,41 @@ def get_unique_sessions(df, metrics):
     return df
 
 
+def scope_fingerprint(df):
+    """Cheap, deterministic signature of the (already-filtered) dataframe.
+
+    Used as a cache key so we don't recompute KPIs/insights when the user
+    re-selects a scope they've already viewed. Much cheaper than letting
+    @st.cache_data pickle the whole frame on every call: we hash only the row
+    index and the column names plus the shape. Because prepare_dataframe runs
+    once and filtering only ever *subsets* rows (never mutates values), the set
+    of surviving row indices uniquely identifies the current scope.
+    """
+    try:
+        idx_hash = int(pd.util.hash_pandas_object(df.index, index=False).sum())
+    except Exception:
+        # Fallback: if the index can't be hashed for any reason, fall back to a
+        # coarser signature (still correct, just less selective).
+        idx_hash = 0
+    return (df.shape, tuple(df.columns), idx_hash)
+
+
+@st.cache_data(show_spinner=False)
+def _compute_kpis_cached(_df, metrics_items, _fp):
+    """Cached KPI computation keyed on the scope fingerprint (_fp).
+
+    _df and metrics_items are passed with a leading underscore so Streamlit does
+    NOT try to hash them (the fingerprint _fp is the real cache key). metrics is
+    reconstructed from its items tuple.
+    """
+    return compute_kpis(_df, dict(metrics_items))
+
+
+def compute_kpis_scoped(df, metrics):
+    """Fingerprint-cached wrapper around compute_kpis for the filtered scope."""
+    return _compute_kpis_cached(df, tuple(sorted(metrics.items())), scope_fingerprint(df))
+
+
 def compute_kpis(df, metrics):
     """Compute KPIs based on available metrics."""
     kpis = {}
@@ -1268,6 +1303,45 @@ def generate_needs_attention(df, metrics, kpis, view_level="regional"):
                 items.append((prog, "low avg score", f"{score:.1f}%"))
 
     return items
+
+
+def _kpis_cache_key(kpis):
+    """A small, hashable signature of the KPI values that influence insights.
+
+    Insights depend on kpis (Pass Rate, Avg Assessment Score, Attach Improvement,
+    etc.), so include a compact tuple of the primitive KPI values in the cache
+    key. We skip private/non-primitive entries to keep it hashable and cheap.
+    """
+    return tuple(
+        (k, v) for k, v in sorted(kpis.items())
+        if not k.startswith("_") and isinstance(v, (int, float, str, bool))
+    )
+
+
+@st.cache_data(show_spinner=False)
+def _executive_insights_cached(_df, metrics_items, view_level, active_market, _fp, _kpi_key):
+    return generate_executive_insights(_df, dict(metrics_items), dict(_kpi_key), view_level, active_market)
+
+
+def generate_executive_insights_scoped(df, metrics, kpis, view_level="regional", active_market=None):
+    """Fingerprint-cached wrapper around generate_executive_insights."""
+    return _executive_insights_cached(
+        df, tuple(sorted(metrics.items())), view_level, active_market,
+        scope_fingerprint(df), _kpis_cache_key(kpis),
+    )
+
+
+@st.cache_data(show_spinner=False)
+def _needs_attention_cached(_df, metrics_items, view_level, _fp, _kpi_key):
+    return generate_needs_attention(_df, dict(metrics_items), dict(_kpi_key), view_level)
+
+
+def generate_needs_attention_scoped(df, metrics, kpis, view_level="regional"):
+    """Fingerprint-cached wrapper around generate_needs_attention."""
+    return _needs_attention_cached(
+        df, tuple(sorted(metrics.items())), view_level,
+        scope_fingerprint(df), _kpis_cache_key(kpis),
+    )
 
 
 def generate_ai_insights(df, metrics, kpis):
@@ -2136,11 +2210,13 @@ def load_master_data():
     if not os.path.exists(MASTER_FILE):
         return None, "Master file not found."
     try:
+        # Open the workbook once and read the target sheet from the same handle
+        # (avoids parsing the file twice).
         xls = pd.ExcelFile(MASTER_FILE)
         if MASTER_SHEET in xls.sheet_names:
-            data = pd.read_excel(MASTER_FILE, sheet_name=MASTER_SHEET, dtype={"Trainee Code": str, "Store Code": str})
+            data = pd.read_excel(xls, sheet_name=MASTER_SHEET, dtype={"Trainee Code": str, "Store Code": str})
         else:
-            data = pd.read_excel(MASTER_FILE, sheet_name=0)
+            data = pd.read_excel(xls, sheet_name=0)
         last_modified = datetime.fromtimestamp(os.path.getmtime(MASTER_FILE))
         return data, last_modified
     except PermissionError:
@@ -2158,11 +2234,12 @@ def load_uploaded_file(uploaded_file):
         if uploaded_file.name.lower().endswith(".csv"):
             data = pd.read_csv(uploaded_file)
         elif uploaded_file.name.lower().endswith((".xlsx", ".xls")):
+            # Open the workbook ONCE and read the target sheet from the same
+            # handle. The previous code opened it twice (ExcelFile + read_excel),
+            # doubling the parse cost on large files.
             xls = pd.ExcelFile(uploaded_file)
-            if "Raw_Data" in xls.sheet_names:
-                data = pd.read_excel(uploaded_file, sheet_name="Raw_Data")
-            else:
-                data = pd.read_excel(uploaded_file, sheet_name=0)
+            sheet = "Raw_Data" if "Raw_Data" in xls.sheet_names else 0
+            data = pd.read_excel(xls, sheet_name=sheet)
         else:
             return None, "Unsupported file type. Please upload an .xlsx or .csv file."
 
@@ -2345,9 +2422,10 @@ if df is not None and len(df) > 0:
         st.warning("No training records match the current filters. Try widening the date range or clearing some filters.")
         st.stop()
 
-    # Recompute after filtering
+    # Recompute after filtering (cached on the scope fingerprint so re-selecting
+    # a previously-viewed scope returns instantly).
     metrics = detect_metrics(df)
-    kpis = compute_kpis(df, metrics)
+    kpis = compute_kpis_scoped(df, metrics)
 
     # ─── DYNAMIC TITLE & BREADCRUMB ───
     COUNTRY_NAMES = {
@@ -2835,8 +2913,8 @@ if df is not None and len(df) > 0:
             _view_level = "account"
         _insight_market = df["Country"].iloc[0] if _n_countries == 1 and len(df) > 0 else None
 
-        # Executive Insights
-        exec_insights = generate_executive_insights(df, metrics, kpis, _view_level, _insight_market)
+        # Executive Insights (cached on the scope fingerprint)
+        exec_insights = generate_executive_insights_scoped(df, metrics, kpis, _view_level, _insight_market)
         if exec_insights:
             st.markdown('<div class="section-header">Key Insights</div>', unsafe_allow_html=True)
             cols = st.columns(2)
@@ -2870,8 +2948,8 @@ if df is not None and len(df) > 0:
                 </div>
                 """, unsafe_allow_html=True)
 
-        # Needs Attention
-        attention_items = generate_needs_attention(df, metrics, kpis, _view_level)
+        # Needs Attention (cached on the scope fingerprint)
+        attention_items = generate_needs_attention_scoped(df, metrics, kpis, _view_level)
         if attention_items:
             st.markdown('<div class="section-header">Needs Attention</div>', unsafe_allow_html=True)
             items_html = "".join(
