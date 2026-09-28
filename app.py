@@ -967,6 +967,42 @@ def prepare_dataframe(df):
     return df
 
 
+def _raw_df_signature(df):
+    """A cheap signature of the RAW (unprepared) source frame.
+
+    Used to decide whether the already-prepared frame in session_state is still
+    valid. We deliberately avoid hashing the whole frame (which is what made
+    every rerun slow); shape + column names + a tiny sample of values is enough
+    to detect a different upload without scanning 40k rows.
+    """
+    try:
+        sample = None
+        if len(df) > 0:
+            # Value at a few fixed cells — changes if a different file is loaded.
+            first_col = df.columns[0]
+            sample = (str(df.iloc[0][first_col]), str(df.iloc[-1][first_col]))
+        return (df.shape, tuple(map(str, df.columns)), sample)
+    except Exception:
+        return (df.shape, tuple(map(str, df.columns)), None)
+
+
+def get_prepared_df(df):
+    """Return the prepared dataframe, preparing only ONCE per source upload.
+
+    prepare_dataframe is @st.cache_data, but Streamlit must HASH its DataFrame
+    argument on every rerun to look up the cache — and hashing a 40k-row frame
+    on every filter change is itself slow. To avoid that, we store the prepared
+    frame in st.session_state and only re-run preparation when the raw source
+    actually changes (detected via a cheap signature, not a full hash).
+    """
+    sig = _raw_df_signature(df)
+    if (st.session_state.get("_prepared_sig") != sig
+            or "_prepared_df" not in st.session_state):
+        st.session_state["_prepared_df"] = prepare_dataframe(df)
+        st.session_state["_prepared_sig"] = sig
+    return st.session_state["_prepared_df"]
+
+
 def detect_metrics(df):
     """Detect which metrics are available in the dataset."""
     metrics = {}
@@ -2391,8 +2427,10 @@ with header_col2:
 
 # === MAIN CONTENT WITH SIDEBAR FILTERS ===
 if df is not None and len(df) > 0:
-    # Prepare (normalize + coerce + parse dates) — cached for performance
-    df = prepare_dataframe(df)
+    # Prepare (normalize + coerce + parse dates) ONCE per upload. Stored in
+    # session_state so we don't re-hash the full raw frame on every rerun just
+    # to look up prepare_dataframe's cache — that hashing was a big per-filter cost.
+    df = get_prepared_df(df)
     metrics = detect_metrics(df)
 
     # ─── SIDEBAR FILTERS ───
@@ -4001,6 +4039,9 @@ with st.sidebar:
             if data is not None:
                 st.session_state.uploaded_df = data
                 st.session_state.data_source = "📎 Upload Excel/CSV"
+                # Invalidate the prepared-frame cache so the new file is re-prepared.
+                st.session_state.pop("_prepared_df", None)
+                st.session_state.pop("_prepared_sig", None)
                 st.success(f"✅ Loaded {len(data):,} records")
                 st.rerun()
             else:
@@ -4040,6 +4081,9 @@ with st.sidebar:
                     data, error = load_uploaded_file(uploaded_file)
                     if data is not None:
                         st.session_state.uploaded_df = data
+                        # Invalidate the prepared-frame cache for the new file.
+                        st.session_state.pop("_prepared_df", None)
+                        st.session_state.pop("_prepared_sig", None)
                         st.success(f"Loaded {len(data):,} records")
                         st.rerun()
                     else:
