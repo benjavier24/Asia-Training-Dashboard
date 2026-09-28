@@ -2923,88 +2923,101 @@ if df is not None and len(df) > 0:
     if selected_market and metrics.get("Account") and len(df) > 0 and df["Account"].nunique() > 1 and len(acct_breakdown) > 0:
         # Display as KPI cards per account (top 6)
         top_accounts = acct_breakdown.head(6)
-        acct_card_cols = st.columns(min(len(top_accounts), 3))
 
         # Compute market average for comparison context
         _mkt_avg_pass = acct_breakdown["Pass Rate"].mean() if "Pass Rate" in acct_breakdown.columns else None
         _pass_rank = acct_breakdown.sort_values("Pass Rate", ascending=False).reset_index(drop=True) if "Pass Rate" in acct_breakdown.columns else None
 
+        # Build ALL account cards into a single HTML string rendered with ONE
+        # st.markdown inside a CSS grid. Previously each card was written via
+        # st.columns + a per-column st.markdown; when the number of accounts
+        # changed between markets (e.g. PH has 6, MY has 3), Streamlit reused the
+        # column layout and left the previous market's cards on screen. A single
+        # markdown block is fully replaced every rerun, so no stale cards linger.
+        _card_htmls = []
         for i, (_, row) in enumerate(top_accounts.iterrows()):
-            with acct_card_cols[i % 3]:
-                acct_name = row["Account"]
-                trainings = int(row["Trainings"])
+            acct_name = row["Account"]
+            trainings = int(row["Trainings"])
 
-                # Ranking badge
-                rank_badge = ""
-                if _pass_rank is not None and len(_pass_rank) > 1:
-                    rank_pos = _pass_rank[_pass_rank["Account"] == acct_name].index
-                    if len(rank_pos) > 0:
-                        pos = rank_pos[0] + 1
-                        if pos == 1:
-                            rank_badge = '<span style="font-size:0.6rem;background:#ECFDF5;color:#10B981;padding:2px 6px;border-radius:100px;font-weight:600;margin-left:6px;">#1 Pass Rate</span>'
-                        elif pos == len(_pass_rank):
-                            rank_badge = '<span style="font-size:0.6rem;background:#FEF2F2;color:#EF4444;padding:2px 6px;border-radius:100px;font-weight:600;margin-left:6px;">Lowest Pass Rate</span>'
+            # Ranking badge
+            rank_badge = ""
+            if _pass_rank is not None and len(_pass_rank) > 1:
+                rank_pos = _pass_rank[_pass_rank["Account"] == acct_name].index
+                if len(rank_pos) > 0:
+                    pos = rank_pos[0] + 1
+                    if pos == 1:
+                        rank_badge = '<span style="font-size:0.6rem;background:#ECFDF5;color:#10B981;padding:2px 6px;border-radius:100px;font-weight:600;margin-left:6px;">#1 Pass Rate</span>'
+                    elif pos == len(_pass_rank):
+                        rank_badge = '<span style="font-size:0.6rem;background:#FEF2F2;color:#EF4444;padding:2px 6px;border-radius:100px;font-weight:600;margin-left:6px;">Lowest Pass Rate</span>'
 
-                parts = [f"<strong style='font-size:0.95rem;'>{acct_name}</strong>{rank_badge}", f"📋 {trainings:,} trainings"]
-                if "Frontliners" in row and row["Frontliners"] > 0:
-                    parts.append(f"👥 {int(row['Frontliners']):,} unique learners")
+            parts = [f"<strong style='font-size:0.95rem;'>{acct_name}</strong>{rank_badge}", f"📋 {trainings:,} trainings"]
+            if "Frontliners" in row and row["Frontliners"] > 0:
+                parts.append(f"👥 {int(row['Frontliners']):,} unique learners")
+            else:
+                # No unique trainee data — count rows as learner attendances
+                acct_participants = len(breakdown_df[breakdown_df["Account"] == acct_name])
+                parts.append(f"👥 {acct_participants:,} learner attendances")
+            if "Stores" in row:
+                parts.append(f"🏪 {int(row['Stores']):,} stores")
+            if "Pass Rate" in row and pd.notna(row["Pass Rate"]):
+                rate = row["Pass Rate"]
+                color = "#10B981" if rate >= 80 else "#EF4444" if rate < 70 else "#F59E0B"
+                vs_avg = ""
+                if _mkt_avg_pass is not None and len(acct_breakdown) > 1:
+                    diff = round(rate - _mkt_avg_pass, 1)
+                    if diff > 0:
+                        vs_avg = f' <span style="font-size:0.7rem;color:#10B981;">+{diff} pts vs market avg</span>'
+                    elif diff < 0:
+                        vs_avg = f' <span style="font-size:0.7rem;color:#EF4444;">{diff} pts vs market avg</span>'
+                parts.append(f'<span style="color:{color};font-weight:600;">{rate:.1f}%</span> pass rate{vs_avg}')
+            if "Avg Score" in row and pd.notna(row["Avg Score"]):
+                parts.append(f"📝 {row['Avg Score']:.1f}% avg assessment score")
+            if "AR Lift (pp)" in row and pd.notna(row["AR Lift (pp)"]):
+                lift = row["AR Lift (pp)"]
+                sign = "+" if lift > 0 else ""
+                color = "#2ecc71" if lift > 0 else "#e74c3c"
+                parts.append(f'📈 <span style="color:{color};font-weight:600;">{sign}{lift:.1f} pts</span> attach rate lift')
+
+            # Show trainers for this account (leaderboard style)
+            if metrics.get("Trainer"):
+                acct_df = breakdown_df[breakdown_df["Account"] == acct_name]
+                # Count unique sessions per trainer (by Training ID or Date)
+                if metrics.get("Training ID"):
+                    acct_trainer_counts = acct_df.groupby("Trainer")["Training ID"].nunique().sort_values(ascending=False)
+                elif metrics.get("Date"):
+                    acct_trainer_counts = acct_df.groupby("Trainer")["Date"].nunique().sort_values(ascending=False)
                 else:
-                    # No unique trainee data — count rows as learner attendances
-                    acct_participants = len(breakdown_df[breakdown_df["Account"] == acct_name])
-                    parts.append(f"👥 {acct_participants:,} learner attendances")
-                if "Stores" in row:
-                    parts.append(f"🏪 {int(row['Stores']):,} stores")
-                if "Pass Rate" in row and pd.notna(row["Pass Rate"]):
-                    rate = row["Pass Rate"]
-                    color = "#10B981" if rate >= 80 else "#EF4444" if rate < 70 else "#F59E0B"
-                    vs_avg = ""
-                    if _mkt_avg_pass is not None and len(acct_breakdown) > 1:
-                        diff = round(rate - _mkt_avg_pass, 1)
-                        if diff > 0:
-                            vs_avg = f' <span style="font-size:0.7rem;color:#10B981;">+{diff} pts vs market avg</span>'
-                        elif diff < 0:
-                            vs_avg = f' <span style="font-size:0.7rem;color:#EF4444;">{diff} pts vs market avg</span>'
-                    parts.append(f'<span style="color:{color};font-weight:600;">{rate:.1f}%</span> pass rate{vs_avg}')
-                if "Avg Score" in row and pd.notna(row["Avg Score"]):
-                    parts.append(f"📝 {row['Avg Score']:.1f}% avg assessment score")
-                if "AR Lift (pp)" in row and pd.notna(row["AR Lift (pp)"]):
-                    lift = row["AR Lift (pp)"]
-                    sign = "+" if lift > 0 else ""
-                    color = "#2ecc71" if lift > 0 else "#e74c3c"
-                    parts.append(f'📈 <span style="color:{color};font-weight:600;">{sign}{lift:.1f} pts</span> attach rate lift')
+                    acct_trainer_counts = acct_df["Trainer"].dropna().value_counts()
 
-                # Show trainers for this account (leaderboard style)
-                if metrics.get("Trainer"):
-                    acct_df = breakdown_df[breakdown_df["Account"] == acct_name]
-                    # Count unique sessions per trainer (by Training ID or Date)
-                    if metrics.get("Training ID"):
-                        acct_trainer_counts = acct_df.groupby("Trainer")["Training ID"].nunique().sort_values(ascending=False)
-                    elif metrics.get("Date"):
-                        acct_trainer_counts = acct_df.groupby("Trainer")["Date"].nunique().sort_values(ascending=False)
-                    else:
-                        acct_trainer_counts = acct_df["Trainer"].dropna().value_counts()
+                if len(acct_trainer_counts) > 0:
+                    top_trainers = acct_trainer_counts.head(5)
+                    medals = ["🥇", "🥈", "🥉", "4.", "5."]
+                    trainer_lines = ""
+                    for rank, (trainer, count) in enumerate(top_trainers.items()):
+                        trainer_lines += f'<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;"><span>{medals[rank]} {trainer}</span><span style="opacity:0.6;font-size:0.75rem;">{int(count)} sessions</span></div>'
+                    # Expandable section for remaining trainers
+                    suffix = ""
+                    if len(acct_trainer_counts) > 5:
+                        remaining = acct_trainer_counts.iloc[5:]
+                        remaining_lines = ""
+                        for rank_offset, (trainer, count) in enumerate(remaining.items(), start=6):
+                            remaining_lines += f'<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;"><span>{rank_offset}. {trainer}</span><span style="opacity:0.6;font-size:0.75rem;">{int(count)} sessions</span></div>'
+                        suffix = f'<details style="margin-top:4px;cursor:pointer;"><summary style="opacity:0.6;font-size:0.7rem;list-style:none;">▸ +{len(remaining)} more trainers</summary>{remaining_lines}</details>'
+                    parts.append(f'<div style="margin-top:4px;border-top:1px solid rgba(0,186,199,0.15);padding-top:6px;"><span style="font-size:0.75rem;opacity:0.6;">TRAINERS</span>{trainer_lines}{suffix}</div>')
 
-                    if len(acct_trainer_counts) > 0:
-                        top_trainers = acct_trainer_counts.head(5)
-                        medals = ["🥇", "🥈", "🥉", "4.", "5."]
-                        trainer_lines = ""
-                        for rank, (trainer, count) in enumerate(top_trainers.items()):
-                            trainer_lines += f'<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;"><span>{medals[rank]} {trainer}</span><span style="opacity:0.6;font-size:0.75rem;">{int(count)} sessions</span></div>'
-                        # Expandable section for remaining trainers
-                        suffix = ""
-                        if len(acct_trainer_counts) > 5:
-                            remaining = acct_trainer_counts.iloc[5:]
-                            remaining_lines = ""
-                            for rank_offset, (trainer, count) in enumerate(remaining.items(), start=6):
-                                remaining_lines += f'<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;"><span>{rank_offset}. {trainer}</span><span style="opacity:0.6;font-size:0.75rem;">{int(count)} sessions</span></div>'
-                            suffix = f'<details style="margin-top:4px;cursor:pointer;"><summary style="opacity:0.6;font-size:0.7rem;list-style:none;">▸ +{len(remaining)} more trainers</summary>{remaining_lines}</details>'
-                        parts.append(f'<div style="margin-top:4px;border-top:1px solid rgba(0,186,199,0.15);padding-top:6px;"><span style="font-size:0.75rem;opacity:0.6;">TRAINERS</span>{trainer_lines}{suffix}</div>')
+            _card_htmls.append(
+                '<div style="background:#FFFFFF; border:1px solid #E5E7EB; border-radius:12px; '
+                'padding:16px; min-height:320px; box-shadow:0 1px 3px rgba(0,0,0,0.04);">'
+                + "<br>".join(parts) + "</div>"
+            )
 
-                st.markdown(f"""
-                <div style="background:#FFFFFF; border:1px solid #E5E7EB; border-radius:12px; padding:16px; margin-bottom:10px; min-height:320px; box-shadow:0 1px 3px rgba(0,0,0,0.04);">
-                    {"<br>".join(parts)}
-                </div>
-                """, unsafe_allow_html=True)
+        # One markdown block: responsive CSS grid, fully replaced each rerun so
+        # the previous market's cards can never linger.
+        _cards_grid = (
+            '<div style="display:grid; grid-template-columns:repeat(3, 1fr); '
+            'gap:10px; margin-bottom:10px;">' + "".join(_card_htmls) + "</div>"
+        )
+        st.markdown(_cards_grid, unsafe_allow_html=True)
 
         # Full table below cards
         col_config_acct = {}
