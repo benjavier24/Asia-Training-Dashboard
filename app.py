@@ -959,6 +959,11 @@ def prepare_dataframe(df):
         df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
         df = df.dropna(subset=["Date"])
 
+    # Reset to a compact RangeIndex. After dropna the index is a scattered set
+    # of ~40k labels; a clean 0..n-1 index makes downstream filtered slices carry
+    # positional labels that are cheap to fingerprint for caching.
+    df = df.reset_index(drop=True)
+
     return df
 
 
@@ -1022,28 +1027,39 @@ def scope_fingerprint(df):
     """Cheap, deterministic signature of the (already-filtered) dataframe.
 
     Used as a cache key so we don't recompute KPIs/insights when the user
-    re-selects a scope they've already viewed. Much cheaper than letting
-    @st.cache_data pickle the whole frame on every call: we hash only the row
-    index and the column names plus the shape. Because prepare_dataframe runs
-    once and filtering only ever *subsets* rows (never mutates values), the set
-    of surviving row indices uniquely identifies the current scope.
+    re-selects a scope they've already viewed. prepare_dataframe assigns a
+    compact 0..n-1 RangeIndex to the master frame, so a filtered slice carries
+    the ORIGINAL positional labels of its surviving rows. The set of those
+    labels uniquely identifies the scope. Instead of hashing all ~40k labels on
+    every call (which was expensive and ran ~12x per rerun), we build a cheap
+    numeric signature from the index values — O(n) integer arithmetic in NumPy,
+    no per-label Python hashing. Different filter subsets get different
+    (len, sum, sum-of-squares, first, last) tuples with negligible collision risk.
     """
+    idx = df.index.to_numpy()
+    n = int(idx.shape[0])
+    if n == 0:
+        return (0, tuple(df.columns))
     try:
-        idx_hash = int(pd.util.hash_pandas_object(df.index, index=False).sum())
+        s = int(idx.sum())
+        ssq = int((idx.astype("int64") * idx.astype("int64")).sum())
+        first = int(idx[0])
+        last = int(idx[-1])
+        sig = (n, s, ssq, first, last)
     except Exception:
-        # Fallback: if the index can't be hashed for any reason, fall back to a
-        # coarser signature (still correct, just less selective).
-        idx_hash = 0
-    return (df.shape, tuple(df.columns), idx_hash)
+        # Fallback for a non-integer index: coarser but still valid.
+        sig = (n,)
+    return (sig, tuple(df.columns))
 
 
 @st.cache_data(show_spinner=False)
-def _compute_kpis_cached(_df, metrics_items, _fp):
-    """Cached KPI computation keyed on the scope fingerprint (_fp).
+def _compute_kpis_cached(_df, metrics_items, fp):
+    """Cached KPI computation keyed on the scope fingerprint (fp).
 
-    _df and metrics_items are passed with a leading underscore so Streamlit does
-    NOT try to hash them (the fingerprint _fp is the real cache key). metrics is
-    reconstructed from its items tuple.
+    _df is underscore-prefixed so Streamlit does NOT hash the whole frame; fp
+    (the scope fingerprint) and metrics_items ARE the cache key. fp must be
+    non-underscore or the cache would key on metrics_items alone and return
+    wrong results across scopes.
     """
     return compute_kpis(_df, dict(metrics_items))
 
@@ -1054,7 +1070,7 @@ def compute_kpis_scoped(df, metrics):
 
 
 @st.cache_data(show_spinner=False)
-def _unique_sessions_cached(_df, metrics_items, _fp):
+def _unique_sessions_cached(_df, metrics_items, fp):
     return get_unique_sessions(_df, dict(metrics_items))
 
 
@@ -1069,7 +1085,7 @@ def get_unique_sessions_scoped(df, metrics):
 
 
 @st.cache_data(show_spinner=False)
-def _store_completion_cached(_df, _fp, duration_days, reference_date_str):
+def _store_completion_cached(_df, fp, duration_days, reference_date_str):
     return compute_store_completion(_df, duration_days=duration_days, reference_date=reference_date_str)
 
 
@@ -1081,7 +1097,7 @@ def compute_store_completion_scoped(df, duration_days=30, reference_date=None):
 
 
 @st.cache_data(show_spinner=False)
-def _csv_bytes_cached(_df, _fp):
+def _csv_bytes_cached(_df, fp):
     return _df.to_csv(index=False).encode("utf-8")
 
 
@@ -1092,7 +1108,7 @@ def export_csv_bytes(df):
 
 
 @st.cache_data(show_spinner=False)
-def _excel_bytes_cached(_df, _fp):
+def _excel_bytes_cached(_df, fp):
     buf = BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as w:
         _df.to_excel(w, index=False, sheet_name="Data")
@@ -1370,8 +1386,11 @@ def _kpis_cache_key(kpis):
 
 
 @st.cache_data(show_spinner=False)
-def _executive_insights_cached(_df, metrics_items, view_level, active_market, _fp, _kpi_key):
-    return generate_executive_insights(_df, dict(metrics_items), dict(_kpi_key), view_level, active_market)
+def _executive_insights_cached(_df, metrics_items, view_level, active_market, fp, kpi_key):
+    # fp (scope fingerprint) and kpi_key MUST be non-underscore so st.cache_data
+    # includes them in the cache key — otherwise this heavy function recomputes
+    # on every rerun. _df is underscored (identified by fp, not re-hashed).
+    return generate_executive_insights(_df, dict(metrics_items), dict(kpi_key), view_level, active_market)
 
 
 def generate_executive_insights_scoped(df, metrics, kpis, view_level="regional", active_market=None):
@@ -1383,8 +1402,9 @@ def generate_executive_insights_scoped(df, metrics, kpis, view_level="regional",
 
 
 @st.cache_data(show_spinner=False)
-def _needs_attention_cached(_df, metrics_items, view_level, _fp, _kpi_key):
-    return generate_needs_attention(_df, dict(metrics_items), dict(_kpi_key), view_level)
+def _needs_attention_cached(_df, metrics_items, view_level, fp, kpi_key):
+    # fp and kpi_key must be non-underscore so they key the cache (see above).
+    return generate_needs_attention(_df, dict(metrics_items), dict(kpi_key), view_level)
 
 
 def generate_needs_attention_scoped(df, metrics, kpis, view_level="regional"):
