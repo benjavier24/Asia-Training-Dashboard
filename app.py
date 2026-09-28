@@ -1053,6 +1053,57 @@ def compute_kpis_scoped(df, metrics):
     return _compute_kpis_cached(df, tuple(sorted(metrics.items())), scope_fingerprint(df))
 
 
+@st.cache_data(show_spinner=False)
+def _unique_sessions_cached(_df, metrics_items, _fp):
+    return get_unique_sessions(_df, dict(metrics_items))
+
+
+def get_unique_sessions_scoped(df, metrics):
+    """Fingerprint-cached deduplicated-sessions frame.
+
+    The render path calls get_unique_sessions ~5-6 times per rerun, each doing a
+    full drop_duplicates over the whole frame. Caching on the scope fingerprint
+    means the dedup runs once per scope and the rest are cache hits.
+    """
+    return _unique_sessions_cached(df, tuple(sorted(metrics.items())), scope_fingerprint(df))
+
+
+@st.cache_data(show_spinner=False)
+def _store_completion_cached(_df, _fp, duration_days, reference_date_str):
+    return compute_store_completion(_df, duration_days=duration_days, reference_date=reference_date_str)
+
+
+def compute_store_completion_scoped(df, duration_days=30, reference_date=None):
+    """Fingerprint-cached store completion. Recomputes only when the scope or the
+    duration/reference-date inputs change."""
+    ref_key = str(reference_date) if reference_date is not None else None
+    return _store_completion_cached(df, scope_fingerprint(df), duration_days, ref_key)
+
+
+@st.cache_data(show_spinner=False)
+def _csv_bytes_cached(_df, _fp):
+    return _df.to_csv(index=False).encode("utf-8")
+
+
+def export_csv_bytes(df):
+    """CSV bytes for the current scope, cached so the full-frame serialize runs
+    once per scope instead of on every rerun of the Data tab."""
+    return _csv_bytes_cached(df, scope_fingerprint(df))
+
+
+@st.cache_data(show_spinner=False)
+def _excel_bytes_cached(_df, _fp):
+    buf = BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as w:
+        _df.to_excel(w, index=False, sheet_name="Data")
+    return buf.getvalue()
+
+
+def export_excel_bytes(df):
+    """Excel bytes for the current scope, cached (same rationale as CSV)."""
+    return _excel_bytes_cached(df, scope_fingerprint(df))
+
+
 def compute_kpis(df, metrics):
     """Compute KPIs based on available metrics."""
     kpis = {}
@@ -2113,37 +2164,49 @@ def compute_store_completion(df, duration_days=30, reference_date=None):
     
     # All unique stores in the full dataset (the "universe" of stores to cover)
     all_stores = df["Store"].dropna().unique().tolist()
-    
+
     # Stores that have training within the duration window
     window_df = df[(df["Date"] >= start_date) & (df["Date"] <= reference_date)]
     completed_stores = window_df["Store"].dropna().unique().tolist()
-    
+
     # Pending stores = all stores minus completed ones
-    pending_stores = [s for s in all_stores if s not in completed_stores]
-    
+    completed_set = set(completed_stores)
+    pending_stores = [s for s in all_stores if s not in completed_set]
+
     total = len(all_stores)
     completed_count = len(completed_stores)
     pending_count = len(pending_stores)
     completion_rate = round((completed_count / total * 100), 1) if total > 0 else 0.0
-    
-    # Build detail DataFrame
-    store_details = []
-    for store in all_stores:
-        store_df = df[df["Store"] == store]
-        window_store_df = window_df[window_df["Store"] == store]
-        last_training = store_df["Date"].max()
-        # Attendance records within the window (row count). Labeled clearly as attendances.
-        attendances_in_window = len(window_store_df)
-        status = "✅ Completed" if store in completed_stores else "⏳ Pending"
-        store_details.append({
-            "Store": store,
-            "Status": status,
-            "Attendances in Window": attendances_in_window,
-            "Last Training Date": last_training,
-            "Days Since Last Training": (reference_date - last_training).days if pd.notna(last_training) else None
-        })
-    
-    store_details_df = pd.DataFrame(store_details).sort_values("Status", ascending=False)
+
+    # Build detail DataFrame — VECTORIZED (was a ~2400-iteration Python loop,
+    # each scanning the full 40k-row frame). Same output, computed with groupby.
+    # The Store column can hold MIXED types (strings + numbers), which breaks a
+    # plain groupby (pandas can't sort mixed keys). Group on a string form of the
+    # store and look results up by that same string form.
+    df_stores = df[df["Store"].notna()].copy()
+    df_stores["_store_key"] = df_stores["Store"].astype(str)
+    last_by_store = df_stores.groupby("_store_key")["Date"].max()
+
+    win_stores = window_df[window_df["Store"].notna()].copy()
+    win_stores["_store_key"] = win_stores["Store"].astype(str)
+    window_counts = win_stores.groupby("_store_key").size()
+
+    # Assemble one row per store, preserving the original store ordering and the
+    # original (raw) store display value.
+    store_details_df = pd.DataFrame({"Store": all_stores})
+    _keys = store_details_df["Store"].astype(str)
+    store_details_df["Status"] = store_details_df["Store"].map(
+        lambda s: "✅ Completed" if s in completed_set else "⏳ Pending"
+    )
+    store_details_df["Attendances in Window"] = (
+        _keys.map(window_counts).fillna(0).astype(int)
+    )
+    store_details_df["Last Training Date"] = _keys.map(last_by_store)
+    _last = pd.to_datetime(store_details_df["Last Training Date"], errors="coerce")
+    store_details_df["Days Since Last Training"] = (
+        (reference_date - _last).dt.days.where(_last.notna(), None)
+    )
+    store_details_df = store_details_df.sort_values("Status", ascending=False)
     
     return {
         "completed_stores": completed_stores,
@@ -2927,7 +2990,7 @@ if df is not None and len(df) > 0:
             st.markdown('<div class="section-header">Pass Rate by Training Type</div>', unsafe_allow_html=True)
             st.markdown('<div style="font-size:0.72rem;color:#6B7280;margin-bottom:6px;">Each training type\'s pass rate against its passing standard (Foundation 70%, Activation/Reinforcement 80%), with the number of unique sessions delivered.</div>', unsafe_allow_html=True)
             # Count unique sessions per method; pass rate from all rows
-            df_method_sessions = get_unique_sessions(df, metrics)
+            df_method_sessions = get_unique_sessions_scoped(df, metrics)
             method_session_counts = df_method_sessions.groupby("Training Type").size().reset_index(name="sessions")
             method_pass_rates = df.groupby("Training Type")["Pass Flag"].mean().reset_index()
             method_pass_rates.columns = ["Training Type", "pass_rate"]
@@ -3183,7 +3246,7 @@ if df is not None and len(df) > 0:
         # all-NaN after filtering (value_counts empty → st.columns(0) would crash).
         _type_data_available = False
         if metrics.get("Training Type") and len(df) > 0:
-            df_type_sessions = get_unique_sessions(df, metrics)
+            df_type_sessions = get_unique_sessions_scoped(df, metrics)
             type_data = df_type_sessions["Training Type"].value_counts().reset_index()
             type_data.columns = ["Type", "Sessions"]
             _type_data_available = len(type_data) > 0
@@ -3293,7 +3356,7 @@ if df is not None and len(df) > 0:
 
             # Compute UNIQUE sessions per group using the standard session helper,
             # deduplicated within the same grouping so counts stay consistent.
-            df_prog_sessions = get_unique_sessions(df, metrics)
+            df_prog_sessions = get_unique_sessions_scoped(df, metrics)
             prog_session_counts = df_prog_sessions.groupby(group_cols).size().reset_index(name="Sessions")
             training_summary = training_summary.merge(prog_session_counts, on=group_cols, how="left")
             training_summary["Sessions"] = training_summary["Sessions"].fillna(0).astype(int)
@@ -3451,7 +3514,7 @@ if df is not None and len(df) > 0:
                     x_title = "Unique Learners"
                     caption = "Distinct people trained per partner (top 10)"
                 elif partner_metric == "Training Sessions":
-                    df_partner_sessions = get_unique_sessions(df, metrics)
+                    df_partner_sessions = get_unique_sessions_scoped(df, metrics)
                     partner_data = df_partner_sessions.groupby("Account").size().reset_index(name="Value")
                     x_title = "Training Sessions"
                     caption = "Unique training sessions per partner (top 10)"
@@ -3534,7 +3597,7 @@ if df is not None and len(df) > 0:
                 # Pass rate from all rows; sessions = unique sessions per trainer
                 t_pass = df.groupby("Trainer")["Pass Flag"].mean().reset_index()
                 t_pass.columns = ["Trainer", "pass_rate"]
-                df_trainer_sessions = get_unique_sessions(df, metrics)
+                df_trainer_sessions = get_unique_sessions_scoped(df, metrics)
                 t_sessions = df_trainer_sessions.groupby("Trainer").size().reset_index(name="sessions")
                 t_data = t_pass.merge(t_sessions, on="Trainer", how="left")
                 t_data["sessions"] = t_data["sessions"].fillna(0).astype(int)
@@ -3692,7 +3755,7 @@ if df is not None and len(df) > 0:
                                          min_value=min_date, max_value=max_date,
                                          help="The end date of the measurement window")
 
-            completion = compute_store_completion(df, duration_days=duration_days, reference_date=ref_date)
+            completion = compute_store_completion_scoped(df, duration_days=duration_days, reference_date=ref_date)
 
             if completion:
                 # KPI row
@@ -3761,7 +3824,7 @@ if df is not None and len(df) > 0:
         if metrics.get("Date"):
             st.markdown('<div class="section-header">Training Volume Over Time</div>', unsafe_allow_html=True)
             # Deduplicate to unique sessions before counting per week
-            df_sessions = get_unique_sessions(df, metrics)
+            df_sessions = get_unique_sessions_scoped(df, metrics)
             df_trend = df_sessions.set_index("Date").resample("W").size().reset_index(name="Sessions")
             fig = px.line(df_trend, x="Date", y="Sessions", color_discrete_sequence=["#0891B2"])
             fig.update_traces(line=dict(width=2.5))
@@ -3851,13 +3914,11 @@ if df is not None and len(df) > 0:
 
         with data_col2:
             st.markdown('<div class="section-header">Export</div>', unsafe_allow_html=True)
-            st.download_button("📄 Download CSV", df.to_csv(index=False), f"{_fname_base}.csv", "text/csv",
+            # Export bytes are cached on the scope fingerprint, so the full-frame
+            # CSV/Excel serialize runs once per scope rather than on every rerun.
+            st.download_button("📄 Download CSV", export_csv_bytes(df), f"{_fname_base}.csv", "text/csv",
                                use_container_width=True)
-            with st.spinner("Preparing Excel export..."):
-                buf = BytesIO()
-                with pd.ExcelWriter(buf, engine="openpyxl") as w:
-                    df.to_excel(w, index=False, sheet_name="Data")
-            st.download_button("📊 Download Excel", buf.getvalue(), f"{_fname_base}.xlsx",
+            st.download_button("📊 Download Excel", export_excel_bytes(df), f"{_fname_base}.xlsx",
                               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                               use_container_width=True)
 
