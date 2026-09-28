@@ -927,6 +927,63 @@ def test_edge_empty_groupby_helpers_no_crash():
     print("PASS Test EDGE-D: Empty dataframe handled by session/KPI helpers without crashing")
 
 
+# === DATA FRESHNESS (upload monitoring) TESTS ===
+
+def test_data_freshness_current_overdue_nodata():
+    """compute_data_freshness classifies markets as current / overdue / no_data
+    against a fixed 'today', using a 14-day threshold."""
+    from app import compute_data_freshness
+    today = pd.Timestamp("2026-09-28")
+    rows = [
+        # ID: latest 5 days ago -> current
+        {"Country": "ID", "Date": pd.Timestamp("2026-09-23")},
+        {"Country": "ID", "Date": pd.Timestamp("2026-08-01")},
+        # PH: latest exactly 14 days ago -> current (boundary, <= 14)
+        {"Country": "PH", "Date": pd.Timestamp("2026-09-14")},
+        # MY: latest 30 days ago -> overdue
+        {"Country": "MY", "Date": pd.Timestamp("2026-08-29")},
+        # VN: no valid date -> no_data
+        {"Country": "VN", "Date": pd.NaT},
+    ]
+    df = pd.DataFrame(rows)
+    res = compute_data_freshness(df, threshold_days=14, today=today)
+    assert res is not None
+    status = {r["market"]: r["status"] for r in res["rows"]}
+    assert status["ID"] == "current", status
+    assert status["PH"] == "current", status  # 14 days is within threshold
+    assert status["MY"] == "overdue", status
+    assert status["VN"] == "no_data", status
+    assert res["current_count"] == 2
+    assert res["overdue_count"] == 1
+    assert res["no_data_count"] == 1
+    assert res["total"] == 4
+    # days_ago is measured against today
+    my_days = next(r["days_ago"] for r in res["rows"] if r["market"] == "MY")
+    assert my_days == 30, my_days
+    print("PASS Test FRESH-A: freshness classifies current/overdue/no_data vs today")
+
+
+def test_data_freshness_missing_columns():
+    """Returns None when Country or Date is absent (no crash)."""
+    from app import compute_data_freshness
+    assert compute_data_freshness(pd.DataFrame({"Country": ["ID"]})) is None
+    assert compute_data_freshness(pd.DataFrame({"Date": [pd.Timestamp("2026-01-01")]})) is None
+    print("PASS Test FRESH-B: freshness returns None when Country/Date missing")
+
+
+def test_data_freshness_overdue_sorted_first():
+    """Overdue/no-data markets sort ahead of current ones for visibility."""
+    from app import compute_data_freshness
+    today = pd.Timestamp("2026-09-28")
+    df = pd.DataFrame([
+        {"Country": "ID", "Date": pd.Timestamp("2026-09-27")},   # current
+        {"Country": "MY", "Date": pd.Timestamp("2026-07-01")},   # overdue
+    ])
+    res = compute_data_freshness(df, threshold_days=14, today=today)
+    assert res["rows"][0]["market"] == "MY", "Overdue market should sort first"
+    print("PASS Test FRESH-C: overdue markets sort first for visibility")
+
+
 def _run_all_tests():
     test_a_repeated_trainee_rows()
     test_b_multiple_sessions_same_week()
@@ -982,6 +1039,10 @@ def _run_all_tests():
     test_nan_needs_attention_and_why_no_nan()
     test_nan_all_blank_subset_shows_no_data()
     print("--- NaN-group handling tests passed ---")
+    test_data_freshness_current_overdue_nodata()
+    test_data_freshness_missing_columns()
+    test_data_freshness_overdue_sorted_first()
+    print("--- data freshness tests passed ---")
     test_edge_trend_all_nat_dates_no_crash()
     test_edge_single_row_trend_no_crash()
     test_edge_attach_rate_no_double_scaling()

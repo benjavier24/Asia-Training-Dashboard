@@ -57,6 +57,11 @@ PASS_THRESHOLDS_BY_TYPE = {
     "reinforcement": 80,
 }
 
+# Data freshness: a market's training data is considered "current" if it has at
+# least one training within this many days of today; otherwise it's "overdue"
+# (a signal for the training manager to upload the latest data).
+DATA_FRESHNESS_DAYS = 14
+
 
 def pass_threshold_for_type(training_type):
     """Return the passing threshold (%) for a given training type.
@@ -1179,6 +1184,58 @@ def _excel_bytes_cached(_df, fp):
 def export_excel_bytes(df):
     """Excel bytes for the current scope, cached (same rationale as CSV)."""
     return _excel_bytes_cached(df, scope_fingerprint(df))
+
+
+def compute_data_freshness(df, threshold_days=DATA_FRESHNESS_DAYS, today=None):
+    """Assess how current each market's training data is, measured against today.
+
+    Returns a dict with:
+      - rows: list of per-market dicts {market, last_date, days_ago, status}
+              status is "current" (<= threshold_days), "overdue" (> threshold_days),
+              or "no_data" (no valid training date for that market).
+      - current_count / overdue_count / total: summary counts.
+      - threshold_days, as_of: echo of the inputs for display.
+    Returns None if the data lacks Country or Date.
+    """
+    if "Country" not in df.columns or "Date" not in df.columns:
+        return None
+
+    as_of = pd.Timestamp(today).normalize() if today is not None else pd.Timestamp.today().normalize()
+
+    dates = pd.to_datetime(df["Date"], errors="coerce")
+    work = pd.DataFrame({"Country": df["Country"], "Date": dates}).dropna(subset=["Country"])
+
+    rows = []
+    current_count = 0
+    overdue_count = 0
+    # Per-market latest date (NaT if the market has no valid dates).
+    last_by_mkt = work.groupby("Country")["Date"].max()
+    for market, last_date in last_by_mkt.items():
+        if pd.isna(last_date):
+            rows.append({"market": market, "last_date": None, "days_ago": None, "status": "no_data"})
+            continue
+        days_ago = int((as_of - last_date.normalize()).days)
+        status = "current" if days_ago <= threshold_days else "overdue"
+        if status == "current":
+            current_count += 1
+        else:
+            overdue_count += 1
+        rows.append({"market": market, "last_date": last_date, "days_ago": days_ago, "status": status})
+
+    # Sort: overdue first (most stale at top), then current, then no-data.
+    _order = {"overdue": 0, "no_data": 1, "current": 2}
+    rows.sort(key=lambda r: (_order.get(r["status"], 3),
+                             -(r["days_ago"] if r["days_ago"] is not None else -1)))
+
+    return {
+        "rows": rows,
+        "current_count": current_count,
+        "overdue_count": overdue_count,
+        "no_data_count": sum(1 for r in rows if r["status"] == "no_data"),
+        "total": len(rows),
+        "threshold_days": threshold_days,
+        "as_of": as_of,
+    }
 
 
 def compute_kpis(df, metrics):
@@ -3074,6 +3131,65 @@ if df is not None and len(df) > 0:
         </div>
         </details>
         """, unsafe_allow_html=True)
+
+        # ─── DATA FRESHNESS BY MARKET (upload monitoring) ───
+        # High-visibility check: is each market's training data current? Uses the
+        # FULL prepared dataset (all markets), independent of the active filter,
+        # so managers can spot markets that are overdue for a data upload.
+        _fresh_source = st.session_state.get("_prepared_df", df)
+        _freshness = compute_data_freshness(_fresh_source)
+        if _freshness and _freshness["total"] > 0:
+            _overdue = _freshness["overdue_count"]
+            _nodata = _freshness["no_data_count"]
+            _current = _freshness["current_count"]
+            _thr = _freshness["threshold_days"]
+            # Banner color: red if anything overdue/missing, green if all current.
+            if _overdue > 0 or _nodata > 0:
+                _banner_bg, _banner_border, _banner_txt = "#FEF2F2", "#FECACA", "#B91C1C"
+                _summary = f"⚠️ {_overdue + _nodata} of {_freshness['total']} markets need a data update"
+            else:
+                _banner_bg, _banner_border, _banner_txt = "#ECFDF5", "#A7F3D0", "#047857"
+                _summary = f"✅ All {_freshness['total']} markets are current"
+
+            st.markdown(
+                f'<div style="background:{_banner_bg};border:1px solid {_banner_border};border-radius:10px;'
+                f'padding:10px 14px;margin-bottom:8px;">'
+                f'<span style="font-weight:700;color:{_banner_txt};font-size:0.9rem;">Data Freshness — {_summary}</span>'
+                f'<span style="color:#6B7280;font-size:0.72rem;"> &nbsp;(a market is “overdue” if its most recent '
+                f'training is more than {_thr} days before today)</span></div>',
+                unsafe_allow_html=True,
+            )
+
+            # Per-market status chips (overdue/no-data first).
+            _status_style = {
+                "current": ("✅", "#ECFDF5", "#047857"),
+                "overdue": ("⚠️", "#FFFBEB", "#B45309"),
+                "no_data": ("⛔", "#FEF2F2", "#B91C1C"),
+            }
+            _chips = []
+            for r in _freshness["rows"]:
+                icon, bg, txt = _status_style.get(r["status"], ("", "#F3F4F6", "#374151"))
+                _mkt_name = COUNTRY_NAMES.get(r["market"], r["market"])
+                if r["status"] == "no_data":
+                    _detail = "no dated training"
+                else:
+                    _last = r["last_date"].strftime("%b %d, %Y")
+                    # Guard against future-dated records (days_ago < 0): show
+                    # "today" rather than a confusing negative number.
+                    if r["days_ago"] is not None and r["days_ago"] > 0:
+                        _detail = f"{r['days_ago']}d ago · {_last}"
+                    else:
+                        _detail = f"latest · {_last}"
+                _chips.append(
+                    f'<div style="background:{bg};border-radius:8px;padding:8px 12px;min-width:150px;">'
+                    f'<div style="font-weight:700;color:{txt};font-size:0.82rem;">{icon} {_mkt_name}</div>'
+                    f'<div style="color:#6B7280;font-size:0.7rem;margin-top:2px;">{_detail}</div></div>'
+                )
+            st.markdown(
+                '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;">'
+                + "".join(_chips) + "</div>",
+                unsafe_allow_html=True,
+            )
 
         # Determine view level for insights
         _n_countries = df["Country"].nunique() if "Country" in df.columns else 0
