@@ -8,6 +8,20 @@ from io import BytesIO
 import numpy as np
 from datetime import datetime
 from thefuzz import fuzz, process
+import commentary_store  # manager commentary persistence (Spec 3b)
+
+# Managers who can author commentary (used for the "Your name" attribution
+# dropdown — there is no login, so this is how saved notes are attributed).
+# Edit this list as your team changes.
+COMMENTARY_AUTHORS = [
+    "Benj Javier",
+    "Training Manager — ID",
+    "Training Manager — PH",
+    "Training Manager — TH",
+    "Training Manager — MY",
+    "Training Manager — VN",
+    "Other",
+]
 
 
 # === LIGHTWEIGHT RENDER TIMING (diagnostic) ===
@@ -3335,6 +3349,89 @@ if df is not None and len(df) > 0:
             _lines += ["", "KEY ACTIONS / NEXT STEPS"]
             _lines += [f"- {a}" for a in _report["key_actions"]]
             st.code("\n".join(_lines), language=None)
+
+        # ─── MANAGER COMMENTARY (Spec 3b) ───
+        # Human-authored notes that persist (saved to the commentary store) so
+        # they build up as historical data alongside the auto-generated summary.
+        st.markdown('<div class="section-header">Manager Commentary</div>', unsafe_allow_html=True)
+        if not commentary_store.is_available():
+            st.info(
+                "📝 Manager commentary storage is not configured yet. "
+                "Once the Google Sheet credential is added, managers will be able to "
+                "add and save their own insights here. "
+                f"({commentary_store.unavailable_reason()})"
+            )
+        else:
+            st.markdown(
+                '<div style="font-size:0.72rem;color:#6B7280;margin-bottom:6px;">'
+                f'Add your own insight for <b>{_scope_label}</b>. Saved notes are kept as '
+                'historical data and can be reviewed over time.</div>',
+                unsafe_allow_html=True,
+            )
+            _cm_c1, _cm_c2 = st.columns([1, 1])
+            with _cm_c1:
+                _cm_author = st.selectbox("Your name", COMMENTARY_AUTHORS, key="cm_author")
+                _cm_section = st.selectbox(
+                    "Type of note",
+                    options=["general", "went_well", "opportunity", "key_action"],
+                    format_func=lambda s: {
+                        "general": "General note",
+                        "went_well": "What went well",
+                        "opportunity": "Area of opportunity",
+                        "key_action": "Key action / next step",
+                    }[s],
+                    key="cm_section",
+                )
+            with _cm_c2:
+                _cm_period = st.text_input(
+                    "Period (optional)", key="cm_period",
+                    placeholder="e.g. 2026-Q3 or Sep 2026",
+                )
+            _cm_text = st.text_area("Your insight", key="cm_text",
+                                    placeholder="Context, the 'why' behind the numbers, decisions made, next steps…")
+            if st.button("💾 Save commentary", key="cm_save"):
+                _ok, _msg = commentary_store.save_commentary(
+                    author=_cm_author,
+                    market=(_insight_market or "All Markets"),
+                    account=(_active_account or ""),
+                    campaign="",  # reserved for when campaign scoping lands
+                    period=_cm_period,
+                    section=_cm_section,
+                    text=_cm_text,
+                )
+                if _ok:
+                    st.success("Saved. It will appear in the history below.")
+                    st.rerun()
+                else:
+                    st.warning(_msg)
+
+            # History for the current scope (market-level), newest first.
+            _hist, _hist_err = commentary_store.load_commentary(
+                market=(_insight_market or "All Markets")
+            )
+            if _hist_err:
+                st.caption(f"Could not load commentary history: {_hist_err}")
+            elif len(_hist) > 0:
+                with st.expander(f"🗂 Commentary history — {_scope_label} ({len(_hist)} notes)"):
+                    _sec_label = {
+                        "went_well": "✅ What went well",
+                        "opportunity": "⚠️ Opportunity",
+                        "key_action": "🎯 Key action",
+                        "general": "📝 Note",
+                    }
+                    for _, _r in _hist.iterrows():
+                        _ts = str(_r.get("timestamp", ""))[:16].replace("T", " ")
+                        _who = _r.get("author", "")
+                        _lbl = _sec_label.get(_r.get("section", "general"), "📝 Note")
+                        _per = f" · {_r.get('period')}" if _r.get("period") else ""
+                        st.markdown(
+                            f'<div style="font-size:0.78rem;border-left:3px solid #E5E7EB;padding:4px 10px;margin-bottom:8px;">'
+                            f'<span style="color:#6B7280;font-size:0.68rem;">{_ts} · {_who}{_per}</span><br>'
+                            f'<b>{_lbl}:</b> {_r.get("text", "")}</div>',
+                            unsafe_allow_html=True,
+                        )
+            else:
+                st.caption("No commentary saved for this scope yet.")
 
         # Pass Rate by Training Type (phase)
         if metrics.get("Training Type") and metrics.get("Pass Flag") and df["Training Type"].nunique() > 1:
