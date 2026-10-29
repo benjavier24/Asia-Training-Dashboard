@@ -984,6 +984,54 @@ def test_data_freshness_overdue_sorted_first():
     print("PASS Test FRESH-C: overdue markets sort first for visibility")
 
 
+# === REPORT SUMMARY (Spec 3a) TESTS ===
+
+def test_report_summary_structure_and_buckets():
+    """generate_report_summary returns the three report sections and routes
+    positive insights to 'went well' and concerns to 'opportunities'."""
+    from app import prepare_dataframe, detect_metrics, compute_kpis, generate_report_summary
+    # Multi-market set: ID strong (all pass), MY weak (mostly fail) -> MY should
+    # surface as an opportunity / key action.
+    rows = []
+    for i in range(20):
+        rows.append({"Country": "ID", "Date of Training": "2026-03-01", "Training Title": "F",
+                     "Trainer Name": "T1", "Partner Name": "ERAFONE", "Training Type": "Foundation",
+                     "Trainee Code": f"ID{i}", "Training Assessment Score %": 95, "Pass Flag": 1})
+    for i in range(20):
+        rows.append({"Country": "MY", "Date of Training": "2026-03-02", "Training Title": "F",
+                     "Trainer Name": "T2", "Partner Name": "UMobile", "Training Type": "Foundation",
+                     "Trainee Code": f"MY{i}", "Training Assessment Score %": 40, "Pass Flag": 1})
+    df = prepare_dataframe(pd.DataFrame(rows))
+    metrics = detect_metrics(df)
+    kpis = compute_kpis(df, metrics)
+    rep = generate_report_summary(df, metrics, kpis, view_level="regional")
+    assert set(rep.keys()) == {"went_well", "opportunities", "key_actions"}, rep.keys()
+    assert isinstance(rep["key_actions"], list) and len(rep["key_actions"]) >= 1
+    # MY is the weak market — it should appear somewhere in opportunities/actions text.
+    blob = " ".join(
+        [f"{h} {d}" for h, d in rep["went_well"] + rep["opportunities"]] + rep["key_actions"]
+    )
+    assert "MY" in blob or "Malaysia" in blob, f"Weak market should be flagged: {blob}"
+    print("PASS Test RPT-A: report summary has 3 sections and flags weak market")
+
+
+def test_report_summary_healthy_scope_has_actions_fallback():
+    """A healthy scope still returns a non-empty, sensible key_actions list."""
+    from app import prepare_dataframe, detect_metrics, compute_kpis, generate_report_summary
+    rows = [
+        {"Country": "ID", "Date of Training": "2026-03-01", "Training Title": "F", "Trainer Name": "T1",
+         "Partner Name": "ERAFONE", "Training Type": "Foundation", "Trainee Code": f"E{i}",
+         "Training Assessment Score %": 95, "Pass Flag": 1}
+        for i in range(15)
+    ]
+    df = prepare_dataframe(pd.DataFrame(rows))
+    metrics = detect_metrics(df)
+    kpis = compute_kpis(df, metrics)
+    rep = generate_report_summary(df, metrics, kpis, view_level="market", active_market="ID")
+    assert len(rep["key_actions"]) >= 1, "Key actions should never be empty"
+    print("PASS Test RPT-B: healthy scope returns a non-empty key-actions fallback")
+
+
 def _run_all_tests():
     test_a_repeated_trainee_rows()
     test_b_multiple_sessions_same_week()
@@ -1043,6 +1091,9 @@ def _run_all_tests():
     test_data_freshness_missing_columns()
     test_data_freshness_overdue_sorted_first()
     print("--- data freshness tests passed ---")
+    test_report_summary_structure_and_buckets()
+    test_report_summary_healthy_scope_has_actions_fallback()
+    print("--- report summary (Spec 3a) tests passed ---")
     test_edge_trend_all_nat_dates_no_crash()
     test_edge_single_row_trend_no_crash()
     test_edge_attach_rate_no_double_scaling()

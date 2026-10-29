@@ -1490,6 +1490,68 @@ def generate_needs_attention(df, metrics, kpis, view_level="regional"):
     return items
 
 
+def generate_report_summary(df, metrics, kpis, view_level="regional", active_market=None):
+    """Organize the existing deterministic insights into a three-part management
+    report: What Went Well / Areas of Opportunity / Key Actions (Spec 3a).
+
+    Reuses generate_executive_insights (status-tagged) and generate_needs_attention
+    so the narrative stays consistent with the rest of the dashboard — this is a
+    reorganization/presentation layer, NOT a new analytics path.
+
+    Returns a dict:
+      {
+        "went_well":     [ (headline, detail), ... ],   # from 'positive' insights
+        "opportunities": [ (headline, detail), ... ],   # from attention/watch/critical
+        "key_actions":   [ "action text", ... ],        # derived next-steps
+      }
+    """
+    insights = generate_executive_insights(df, metrics, kpis, view_level, active_market)
+
+    went_well, opportunities = [], []
+    for status, headline, detail in insights:
+        if status == "positive":
+            went_well.append((headline, detail))
+        elif status in ("attention", "watch", "critical"):
+            opportunities.append((headline, detail))
+        # 'neutral' insights are context, not well/opportunity — left out of both.
+
+    # Key Actions: turn the attention list + low performers into concrete,
+    # plain-language next steps. Deterministic, scope-aware.
+    key_actions = []
+    attn = generate_needs_attention(df, metrics, kpis, view_level)
+    dim_label = "market" if view_level == "regional" else "account"
+    for entity, reason, metric_str in attn[:3]:
+        if "pass rate" in reason:
+            key_actions.append(
+                f"Review training content and delivery for {entity} ({dim_label}) — {reason} at {metric_str}."
+            )
+        elif "score" in reason:
+            key_actions.append(
+                f"Investigate low assessment scores in {entity} — {metric_str}; consider a refresher or content review."
+            )
+        else:
+            key_actions.append(f"Follow up on {entity} — {reason} ({metric_str}).")
+
+    # Pass-rate-level action when the overall rate is below the 85% 'strong' mark.
+    rate = kpis.get("Pass Rate")
+    if rate is not None and rate < 85 and not any("content" in a for a in key_actions):
+        key_actions.append(
+            f"Overall pass rate is {rate}% — identify the lowest-performing programs and schedule targeted refreshers."
+        )
+
+    # Attach-rate action when post-training lift is negative.
+    imp = kpis.get("Attach Improvement")
+    if imp is not None and imp < 0:
+        key_actions.append(
+            f"Attach rate declined by {abs(imp)} pts post-training — review whether training is translating to selling behavior."
+        )
+
+    if not key_actions:
+        key_actions.append("Maintain current approach — metrics are within healthy ranges across the selected scope.")
+
+    return {"went_well": went_well, "opportunities": opportunities, "key_actions": key_actions}
+
+
 def _kpis_cache_key(kpis):
     """A small, hashable signature of the KPI values that influence insights.
 
@@ -3209,6 +3271,70 @@ if df is not None and len(df) > 0:
             for i, (status, headline, detail) in enumerate(exec_insights):
                 with cols[i % 2]:
                     st.markdown(render_insight_card(status, headline, detail), unsafe_allow_html=True)
+
+        # ─── MANAGEMENT REPORT SUMMARY (Spec 3a) ───
+        # Auto-generated, scope-aware readout organized for reporting:
+        # What Went Well / Areas of Opportunity / Key Actions. Reuses the same
+        # deterministic insights shown above, regrouped for a report format.
+        _report = generate_report_summary(df, metrics, kpis, _view_level, _insight_market)
+        _scope_label = (COUNTRY_NAMES.get(_insight_market, _insight_market)
+                        if _insight_market else "All Markets")
+        st.markdown('<div class="section-header">Report Summary</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div style="font-size:0.72rem;color:#6B7280;margin-bottom:6px;">'
+            f'Auto-generated management readout for <b>{_scope_label}</b>, based on the current filters. '
+            'Use it as a starting point for reports.</div>',
+            unsafe_allow_html=True,
+        )
+
+        _rep_c1, _rep_c2, _rep_c3 = st.columns(3)
+
+        def _render_report_col(col, title, color, items, empty_msg):
+            with col:
+                st.markdown(
+                    f'<div style="font-weight:700;color:{color};font-size:0.85rem;'
+                    f'border-bottom:2px solid {color};padding-bottom:4px;margin-bottom:8px;">{title}</div>',
+                    unsafe_allow_html=True,
+                )
+                if not items:
+                    st.markdown(f'<div style="font-size:0.78rem;color:#9CA3AF;">{empty_msg}</div>',
+                                unsafe_allow_html=True)
+                    return
+                for it in items:
+                    if isinstance(it, tuple):
+                        head, det = it
+                        st.markdown(
+                            f'<div style="font-size:0.78rem;margin-bottom:8px;line-height:1.4;">'
+                            f'<span style="font-weight:600;">• {head}</span>'
+                            f'{("<br><span style=\'color:#6B7280;font-size:0.72rem;\'>" + det + "</span>") if det else ""}'
+                            f'</div>',
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.markdown(
+                            f'<div style="font-size:0.78rem;margin-bottom:8px;line-height:1.4;">• {it}</div>',
+                            unsafe_allow_html=True,
+                        )
+
+        _render_report_col(_rep_c1, "✅ What Went Well", "#047857",
+                            _report["went_well"], "No standout positives in this scope yet.")
+        _render_report_col(_rep_c2, "⚠️ Areas of Opportunity", "#B45309",
+                            _report["opportunities"], "No flagged concerns in this scope.")
+        _render_report_col(_rep_c3, "🎯 Key Actions", "#1D4ED8",
+                            _report["key_actions"], "No actions required.")
+
+        # Copy-ready plain-text version for pasting into reports/decks.
+        with st.expander("📋 Copy as text (for reports)"):
+            _lines = [f"TRAINING REPORT SUMMARY — {_scope_label}", ""]
+            _lines.append("WHAT WENT WELL")
+            _lines += ([f"- {h}" + (f" ({d})" if d else "") for h, d in _report["went_well"]]
+                       or ["- (none)"])
+            _lines += ["", "AREAS OF OPPORTUNITY"]
+            _lines += ([f"- {h}" + (f" ({d})" if d else "") for h, d in _report["opportunities"]]
+                       or ["- (none)"])
+            _lines += ["", "KEY ACTIONS / NEXT STEPS"]
+            _lines += [f"- {a}" for a in _report["key_actions"]]
+            st.code("\n".join(_lines), language=None)
 
         # Pass Rate by Training Type (phase)
         if metrics.get("Training Type") and metrics.get("Pass Flag") and df["Training Type"].nunique() > 1:
